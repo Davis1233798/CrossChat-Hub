@@ -18,6 +18,12 @@ const fixtureServices = config.SERVICES.map(service => service.kind === 'web' ? 
 require.cache[configPath].exports = { ...config, SERVICES: fixtureServices, getService: id => fixtureServices.find(service => service.id === id) || null };
 require('../desktop/main.cjs');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function loadFixture(contents) {
+  // Startup/recreated views may already be navigating to this same fixture.
+  // Wait for that navigation rather than aborting it with a second loadURL.
+  if (contents.isLoading()) await new Promise(resolve => contents.once('did-stop-loading', resolve));
+  if (contents.getURL() !== origin && contents.getURL() !== origin + '/') await loadFixture(contents);
+}
 app.whenReady().then(async () => {
   let window;
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -44,7 +50,7 @@ app.whenReady().then(async () => {
   }
   const contents = window.contentView.children[0].webContents;
   assert.equal(contents.session, session.fromPartition('persist:crosschat-slack'));
-  await contents.loadURL(origin);
+  await loadFixture(contents);
   assert.equal(new URL(contents.getURL()).origin, origin);
   // Script inspection is restricted to the synthetic loopback fixture above.
   // No script is injected into a messenger provider or any real account.
@@ -91,7 +97,7 @@ app.whenReady().then(async () => {
     assert.deepEqual(await other.cookies.get({ url: origin, name: 'crosschat-test' }), []);
     await shell.executeJavaScript('window.crosschatDesktop.switchTab("discord")');
     const otherContents = window.contentView.children[0].webContents;
-    await otherContents.loadURL(origin);
+    await loadFixture(otherContents);
     assert.equal(new URL(otherContents.getURL()).origin, origin);
     assert.equal(await otherContents.executeJavaScript('localStorage.getItem("crosschat-test")'), null);
     await other.cookies.set({ url: origin, name: 'crosschat-test', value: 'other-provider', expirationDate: Math.floor(Date.now() / 1000) + 3600 });
@@ -158,14 +164,14 @@ app.whenReady().then(async () => {
       } finally { dialog.showMessageBox = originalDialog; }
     }
     const target = window.contentView.children[0].webContents;
-    await target.loadURL(origin);
+    await loadFixture(target);
     assert.equal(new URL(target.getURL()).origin, origin);
     assert.deepEqual(await target.session.cookies.get({ url: origin, name: 'crosschat-test' }), []);
     assert.equal(await target.executeJavaScript('localStorage.getItem("crosschat-test")'), null);
     assert.deepEqual(await target.executeJavaScript('indexedDB.databases().then(items => items.map(item => item.name))'), []);
     await shell.executeJavaScript('window.crosschatDesktop.switchTab("discord")');
     const other = window.contentView.children[0].webContents;
-    await other.loadURL(origin);
+    await loadFixture(other);
     assert.equal(new URL(other.getURL()).origin, origin);
     assert.equal((await other.session.cookies.get({ url: origin, name: 'crosschat-test' }))[0]?.value, 'other-provider');
     assert.equal(await other.executeJavaScript('localStorage.getItem("crosschat-test")'), 'other-provider');
