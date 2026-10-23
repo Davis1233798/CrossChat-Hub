@@ -4,6 +4,9 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { SERVICES, LINE_DOWNLOADS, getService } = require('./tab-config.cjs');
 const { protectContents } = require('./navigation.cjs');
+const { createShutdown, flushSessions } = require('./lifecycle.cjs');
+const { createSessionReset } = require('./session-data.cjs');
+const { createResetIntentStore } = require('./reset-intent.cjs');
 const { isOfficialOrigin, canCheckPermission, needsUserApproval } = require('./permissions.cjs');
 
 // Each official site runs in its own hardened, persistent Chromium profile.
@@ -17,6 +20,9 @@ let currentView = null;
 const views = new Map();
 const configuredPartitions = new Set();
 const permissionGrants = new Set();
+const popupWindows = new Map();
+const permissionVersions = new Map();
+const activeDownloads = new Map();
 let externalPromptPending = false;
 let closing = false;
 
@@ -46,8 +52,10 @@ function configureSession(service) {
 
   // Chromium first checks permissions synchronously, then requests consent.
   // Never permit a third-party link or embedded frame to access devices.
-  isolated.setPermissionCheckHandler((_wc, permission, origin) => canCheckPermission(service.id, origin, permission));
+  isolated.setPermissionCheckHandler((_wc, permission, origin) => !closing && !profileReset.isBlocked(service.id) && canCheckPermission(service.id, origin, permission));
   isolated.setPermissionRequestHandler((wc, permission, callback, details) => {
+    if (closing || profileReset.isBlocked(service.id)) return callback(false);
+    const version = permissionVersions.get(service.id) || 0;
     const origin = officialOriginForRequest(service, wc, details);
     if (!origin || !canCheckPermission(service.id, origin, permission)) return callback(false);
     if (!needsUserApproval(permission)) return callback(true);
@@ -60,12 +68,16 @@ function configureSession(service) {
       detail: '只有本次執行期間會記住授權。你可以拒絕而繼續使用一般文字聊天。',
       buttons: ['拒絕', '允許'], defaultId: 0, cancelId: 0, noLink: true,
     }).then(({ response }) => {
-      if (response === 1) permissionGrants.add(key);
-      callback(response === 1);
+      const allowed = response === 1 && !closing && !profileReset.isBlocked(service.id) && version === (permissionVersions.get(service.id) || 0);
+      if (allowed) permissionGrants.add(key);
+      callback(allowed);
     }).catch(() => callback(false));
   });
 
   isolated.on('will-download', (_event, item, _contents) => {
+    if (closing || profileReset.isBlocked(service.id)) { _event.preventDefault(); return; }
+    if (!activeDownloads.has(service.id)) activeDownloads.set(service.id, new Set());
+    activeDownloads.get(service.id).add(item);
     // Let the user choose the destination; do not silently accept download paths.
     const cleanName = path.basename(item.getFilename().replace(/[\\/]/g, '_')) || 'download';
     item.setSaveDialogOptions({
@@ -73,7 +85,10 @@ function configureSession(service) {
       defaultPath: path.join(app.getPath('downloads'), cleanName),
       buttonLabel: '儲存',
     });
-    item.once('done', (_e, state) => announce(service.id, state === 'completed' ? 'downloaded' : 'download-error'));
+    item.once('done', (_e, state) => {
+      activeDownloads.get(service.id)?.delete(item);
+      if (!profileReset.isBlocked(service.id)) announce(service.id, state === 'completed' ? 'downloaded' : 'download-error');
+    });
   });
   return isolated;
 }
@@ -91,6 +106,9 @@ function tabView(service) {
   });
   view.setBackgroundColor('#0b1220');
   const wc = view.webContents;
+  const report = (state, detail) => {
+    if (views.get(service.id) === view && !wc.isDestroyed() && !profileReset.isBlocked(service.id)) announce(service.id, state, detail);
+  };
   protectContents(wc, service, { openExternal: async url => {
     if (closing || externalPromptPending || !mainWindow || mainWindow.isDestroyed()) return;
     externalPromptPending = true;
@@ -104,19 +122,23 @@ function tabView(service) {
       if (response === 1 && !closing) await shell.openExternal(url);
     } catch { announce(service.id, 'external-error'); }
     finally { externalPromptPending = false; }
-  }, onPopup: popup => attachHotkeys(popup.webContents) });
+  }, onPopup: popup => {
+    popupWindows.set(popup, service.id);
+    popup.once('closed', () => popupWindows.delete(popup));
+    attachHotkeys(popup.webContents);
+  } });
   attachHotkeys(wc);
-  wc.on('did-start-loading', () => announce(service.id, 'loading'));
-  wc.on('did-finish-load', () => announce(service.id, 'loaded'));
+  wc.on('did-start-loading', () => report('loading'));
+  wc.on('did-finish-load', () => report('loaded'));
   wc.on('did-fail-load', (_event, code, description, _url, isMainFrame) => {
-    if (isMainFrame && code !== -3) announce(service.id, 'failed', `${code} ${description}`);
+    if (isMainFrame && code !== -3) report('failed', `${code} ${description}`);
   });
   wc.on('page-title-updated', (_event, title) => {
     const count = title.match(/^\((\d+)\)/)?.[1];
-    announce(service.id, 'title', count ? String(Math.min(Number(count), 999)) : '');
+    report('title', count ? String(Math.min(Number(count), 999)) : '');
   });
   views.set(service.id, view);
-  wc.loadURL(service.url).catch(error => announce(service.id, 'failed', String(error.message)));
+  wc.loadURL(service.url).catch(error => report('failed', String(error.message)));
   return view;
 }
 function chooseTab(id) {
@@ -126,14 +148,53 @@ function chooseTab(id) {
   if (currentView) { mainWindow.contentView.removeChildView(currentView); currentView = null; }
   currentId = id;
   announce(id, 'selected');
-  if (service.kind === 'web') {
+  if (service.kind === 'web' && !profileReset.isBlocked(id)) {
     currentView = tabView(service);
     mainWindow.contentView.addChildView(currentView);
     currentView.setBounds(viewBounds());
     currentView.webContents.focus();
   }
-  announce(id, service.kind !== 'web' ? 'unsupported' : (currentView.webContents.isLoading() ? 'loading' : 'loaded'));
+  announce(id, service.kind !== 'web' ? 'unsupported' : profileReset.isBlocked(id) ? (profileReset.isPending(id) ? 'resetting' : 'reset-error') : (currentView.webContents.isLoading() ? 'loading' : 'loaded'));
 }
+function destroyServiceWriters(service) {
+  const view = views.get(service.id);
+  if (view && currentView === view) {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.contentView.removeChildView(view);
+    currentView = null;
+  }
+  if (view && !view.webContents.isDestroyed()) view.webContents.destroy();
+  views.delete(service.id);
+  for (const [popup, id] of popupWindows) {
+    if (id === service.id && !popup.isDestroyed()) popup.destroy();
+  }
+  for (const item of activeDownloads.get(service.id) || []) item.cancel();
+  activeDownloads.delete(service.id);
+}
+const resetIntents = createResetIntentStore(path.join(app.getPath('userData'), 'pending-profile-resets'), SERVICES.filter(service => service.kind === 'web').map(service => service.id));
+const profileReset = createSessionReset({
+  initialBlocked: resetIntents.pending(), persistIntent: resetIntents.mark, clearIntent: resetIntents.clear,
+  getService, getSession: service => configureSession(service),
+  isClosing: () => closing,
+  confirm: async service => {
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'warning', title: `清除 ${service.title} 本機登入資料`,
+      message: `要清除 ${service.title} 在此裝置上的登入與網站資料？`,
+      detail: '此平台的視窗和未完成下載會關閉，下次使用需要重新登入。其他平台、其他裝置及已儲存的附件不受影響。這不會撤銷伺服器端的裝置授權；請使用官方平台的裝置管理功能。',
+      buttons: ['取消', '清除本機資料'], defaultId: 0, cancelId: 0, noLink: true,
+    });
+    return response === 1;
+  },
+  destroyWriters: destroyServiceWriters,
+  revokePermissions: id => {
+    permissionVersions.set(id, (permissionVersions.get(id) || 0) + 1);
+    for (const key of permissionGrants) if (key.startsWith(`${id}|`)) permissionGrants.delete(key);
+    announce(id, 'title', '');
+  },
+  onState: (id, state) => {
+    announce(id, state);
+    if (state === 'cleared' && !closing && currentId === id) chooseTab(id);
+  },
+});
 function attachHotkeys(contents) {
   contents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || !(input.control || input.meta)) return;
@@ -149,15 +210,27 @@ function attachHotkeys(contents) {
     }
   });
 }
-function quitImmediately() {
-  if (closing) return;
-  closing = true;
-  for (const view of views.values()) {
-    if (!view.webContents.isDestroyed()) view.webContents.destroy();
-  }
-  views.clear();
-  app.exit(0);
-}
+const quitSafely = createShutdown({
+  prepare: () => {
+    closing = true;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+    // Stop every remote writer, including authentication popups, before flushing.
+    for (const popup of popupWindows.keys()) if (!popup.isDestroyed()) popup.destroy();
+    popupWindows.clear();
+    if (currentView && mainWindow && !mainWindow.isDestroyed()) mainWindow.contentView.removeChildView(currentView);
+    currentView = null;
+    for (const view of views.values()) {
+      if (!view.webContents.isDestroyed()) view.webContents.destroy();
+    }
+    views.clear();
+  },
+  flush: async () => {
+    await profileReset.waitForActive();
+    await flushSessions([session.defaultSession, ...[...configuredPartitions].map(partition => session.fromPartition(partition))]);
+  },
+  exit: code => app.exit(code),
+  onFailure: () => console.error('Desktop session persistence failed or timed out during shutdown.'),
+});
 async function openWindow() {
   mainWindow = new BrowserWindow({
     title: 'CrossChat Hub', show: false,
@@ -175,7 +248,8 @@ async function openWindow() {
   });
   attachHotkeys(mainWindow.webContents);
   mainWindow.on('resize', () => currentView?.setBounds(viewBounds()));
-  mainWindow.on('closed', quitImmediately);
+  mainWindow.on('close', event => { event.preventDefault(); void quitSafely(); });
+  mainWindow.on('closed', () => { void quitSafely(); });
   await mainWindow.loadFile(path.join(__dirname, 'shell.html'));
   if (!closing) mainWindow.show();
 }
@@ -188,9 +262,14 @@ if (singleInstance) {
     });
     ipcMain.handle('crosschat:tab-reload', (event, id) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      if (closing || profileReset.isBlocked(id)) return false;
       const wc = views.get(id)?.webContents;
       if (currentId !== id || !wc || wc.isDestroyed()) return false;
       wc.reload(); return true;
+    });
+    ipcMain.handle('crosschat:profile-clear', (event, id) => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      return profileReset.request(id);
     });
     ipcMain.handle('crosschat:open-browser', (event, id) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
@@ -206,9 +285,10 @@ if (singleInstance) {
     });
     ipcMain.handle('crosschat:quit', event => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
-      quitImmediately();
+      void quitSafely();
     });
     await openWindow();
   }).catch(error => { console.error('Desktop failed to start:', error); app.exit(1); });
-  app.on('window-all-closed', quitImmediately);
+  app.on('before-quit', event => { event.preventDefault(); void quitSafely(); });
+  app.on('window-all-closed', () => { void quitSafely(); });
 }

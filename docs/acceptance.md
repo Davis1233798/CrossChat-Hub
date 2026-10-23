@@ -9,17 +9,23 @@ This is a development checkpoint, not approval for a production release.
 | Check | Result | What it establishes |
 |---|---|---|
 | `npm run check` | Pass | JavaScript syntax, including navigation policy and smoke harness |
-| `npm test` | 35 passed | Backend mock/local checks; navigation policy, redirects and nested popup behavior with fake WebContents |
+| `npm test` | 43 passed | Backend mock/local checks; navigation, bounded shutdown, target-scoped clearing and persistent reset intent ordering |
 | `npm run test:desktop` | Pass on Windows 11 / Node 24.0.2 / Electron 45 | Real visible window, Ctrl+5 / Ctrl+1 shell selection, honest LINE panel, remote view Node disabled, normal window close with process exit code 0 |
 | Windows x64 build | MSI / NSIS EXE / ZIP produced | Build only; unsigned. Unpacked packaged EXE created a visible native window and exited normally with code 0 |
-| Remote syntax/unit CI | Pass, code commit `7492fe8` | [Run 39949726550](https://github.com/JackChen6203/CrossChat-Hub/actions/runs/39949726550) |
-| Remote desktop matrix | All jobs passed, code commit `7492fe8` | [Run 39949726403](https://github.com/JackChen6203/CrossChat-Hub/actions/runs/39949726403): native window smoke on Windows/macOS x64/arm64, three packaging artifacts; release skipped |
+| `npm run test:session` | Pass on local Windows 11 | Five real process starts: synthetic Cookie/localStorage/IndexedDB persistence, platform isolation, cancellation, popup teardown, injected reset failure, restart-persistent block, retry, deletion persistence and other-provider preservation |
+| Previous remote syntax/unit CI | Pass, code commit `7492fe8` | [Run 39949726550](https://github.com/JackChen6203/CrossChat-Hub/actions/runs/39949726550); new lifecycle/reset changes awaiting remote verification |
+| Previous remote desktop matrix | All jobs passed, code commit `7492fe8` | [Run 39949726403](https://github.com/JackChen6203/CrossChat-Hub/actions/runs/39949726403): native window smoke on Windows/macOS x64/arm64, three packaging artifacts; release skipped |
 | Remote Windows NSIS lifecycle | Pass on hosted Windows runner | Clean install, visible window, normal exit, reinstall same version while running, relaunch, uninstall while running, executable/process removal |
 | Remote macOS x64/arm64 | Build, source-window smoke and DMG mount checks passed | Not proof of packaged installation/upgrade or real provider login |
 
 The native-window harness uses a newly created OS temporary profile and does not
 touch existing messenger sessions. It inspects the local shell only. No account
 login, live messages or website JavaScript injection is part of this smoke test.
+The session harness also inspects an explicitly checked loopback fixture containing
+synthetic data only. It mocks native confirmation answers and one intentional
+Chromium deletion failure; actual storage APIs, real auth-popup creation/teardown
+and all five process starts are exercised. The failed-state shell was visually
+inspected at minimum window width. No real QR code or account data was captured.
 
 Local Windows build initially failed because winCodeSign's bundled macOS dylib
 symlinks could not be extracted without Windows symlink privileges. The successful
@@ -98,6 +104,8 @@ completed solution; commercial authorization and a viable implementation remain
 unresolved rather than a legal conclusion about all possible future integrations.
 
 Cross-platform `@platform:alias` in website tabs has no live authorized delivery,
-consent/revocation or real platform-pair E2E evidence. Other gates include graceful
-session flushing, local data clearing, installer migration, signing/notarization
-and custom enterprise SSO. No formal Latest Release may be inferred from this work.
+consent/revocation or real platform-pair E2E evidence. Other gates include live
+provider validation of the new storage lifecycle, installer migration,
+signing/notarization and custom enterprise SSO. Local persistence/clearing fixture
+evidence does not establish real provider logout, device revocation or server
+message retention. No formal Latest Release may be inferred from this work.

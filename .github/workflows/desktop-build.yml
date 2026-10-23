@@ -64,6 +64,8 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Native Electron window and keyboard smoke (no provider login)
         run: npm run test:desktop
+      - name: Session persistence, isolated reset and real process restart (synthetic fixture)
+        run: npm run test:session
       - name: Build desktop installers
         run: npm run desktop:${{ matrix.platform }} -- --${{ matrix.arch }} --publish never
       - name: Validate generated installers

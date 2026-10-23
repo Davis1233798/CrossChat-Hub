@@ -20,6 +20,7 @@
     <span class="spacer"></span>
     <button type="button" id="open-browser" title="在系統瀏覽器開啟官方網站（內嵌登入受限時使用）">官方網站 ↗</button>
     <button type="button" id="reload" title="重新載入目前的網站" aria-label="重新載入">↻</button>
+    <button type="button" id="clear-profile" title="清除此平台在本機的登入及網站資料">清除登入</button>
     <button type="button" id="quit" title="完全結束程式" aria-label="結束程式">結束</button>
   </nav>
   <div class="status"><span id="indicator" aria-hidden="true"></span><span id="status">選擇平台登入；登入資料只留在此裝置，各平台帳號彼此隔離</span></div>
@@ -34,6 +35,7 @@
     <small>其他四個分頁會使用各平台官方網頁介面。能否成功登入仍取決於平台是否允許使用 Electron 內嵌 Chromium。</small>
   </section>
   <section id="connecting" class="native-panel"><div class="spinner"></div><h2>載入官方聊天網站中</h2><p>首次使用請依該平台自己的登入流程完成驗證。</p></section>
+  <section id="profile-state" class="native-panel" hidden><h2 id="profile-state-title"></h2><p id="profile-state-detail"></p></section>
 </main>
 </body>
 </html>

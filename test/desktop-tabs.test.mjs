@@ -34,6 +34,6 @@ test('native shell never requests a platform password or developer bot token', (
   const src = readFileSync(new URL('../desktop/main.cjs', import.meta.url), 'utf8');
   assert.match(src, /nodeIntegration: false/);
   assert.match(src, /sandbox: true/);
-  assert.match(src, /app\.exit\(0\)/);
+  assert.match(src, /quitSafely/);
   assert.doesNotMatch(src, /startHub/);
 });

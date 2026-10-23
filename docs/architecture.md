@@ -3,7 +3,8 @@
 The active desktop process runs `desktop/main.cjs`, loads a local sandboxed shell,
 and hosts one visible WebContentsView at a time. Previously opened web views stay
 alive, each in a separate persistent provider session. The local preload exposes
-only tab switching, reload, curated official links, status events and quit.
+only tab switching, reload, curated official links, status events, confirmed
+per-provider local data clearing and quit.
 Provider pages have no preload/native API and no Node integration.
 
 `desktop/navigation.cjs` applies navigation, redirect and recursive popup policy.
@@ -11,6 +12,14 @@ Provider pages have no preload/native API and no Node integration.
 a permitted SSO navigation does not grant device access to that identity provider.
 The local shell records only the last selected tab, not verified login state.
 Titles can supply an unverified unread count, never proof of authentication.
+
+`desktop/lifecycle.cjs` coordinates one bounded shutdown across window close,
+application quit and installer close requests, flushing configured sessions before
+exit. `desktop/session-data.cjs` coordinates confirmed local resets and rejects
+non-web/arbitrary profiles. `desktop/reset-intent.cjs` persists content-free
+pending markers in userData so a failed/interrupted reset cannot silently reopen
+the target profile after restart. These are local browser-storage operations,
+separate from provider logout or server-side device authorization revocation.
 
 Confirmed services: Telegram, Discord, Slack, WhatsApp and LINE. LINE has no
 implemented embedded client. Official website tabs are a manual interaction

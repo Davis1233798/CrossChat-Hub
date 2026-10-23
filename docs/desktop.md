@@ -13,8 +13,11 @@ external LINE application is not equivalent to meeting the five-tab requirement.
 
 Login, messages and logout are performed by each official site. Website loading
 is not proof of successful authentication. Use the site's logout action to revoke
-that local login; there is currently no CrossChat clear-profile control. External
-browser authentication does not transfer sessions into this application.
+that local login. The toolbar's clear-login control removes the selected
+provider's local website data after native confirmation. It closes that provider's
+views, authentication popups and unfinished downloads; saved attachments and other
+providers are untouched. It does not revoke a server-side device authorization.
+External browser authentication does not transfer sessions into this application.
 
 ## Navigation and security
 
@@ -35,8 +38,27 @@ Top-level navigations, server redirects and nested popups share one policy:
 - Authentication popups show their current origin in the native title bar.
 
 No page scripts are injected into live messenger websites. Developer smoke tests
-inspect only the local shell. Site logout, secure session flushing on shutdown,
-data deletion and provider-specific authentication still need further validation.
+inspect the local shell and an explicitly checked loopback fixture only.
+
+## Persistence and local deletion
+
+Window close, the quit button and application quit share one shutdown operation.
+Remote views and authentication popups stop before DOM storage and cookie writes
+are flushed. A five-second deadline prevents a stuck store holding the executable
+open indefinitely; persistence failure/timeout logs a generic error and exits 1,
+rather than falsely reporting successful shutdown.
+
+Local deletion blocks new requests, destroys provider writers, cancels its pending
+downloads, closes network connections, clears HTTP authentication and Chromium
+website data, and flushes the cleared state before reopening. Permission grants
+and stale permission-dialog answers are invalidated. A pending-reset marker is
+written before deletion and removed only after success; failure/interruption keeps
+that provider blocked across restart until an explicit retry succeeds. No cookie
+or password is copied/exported and no arbitrary filesystem path can be supplied
+through the renderer bridge. Browser-level clearing is not forensic disk erasure.
+
+Site logout, server-side device revocation and real provider authentication remain
+separate from this synthetic-fixture storage verification.
 
 ## Developer verification
 
@@ -47,6 +69,7 @@ npm ci
 npm run check
 npm test
 npm run test:desktop
+npm run test:session
 npm run desktop:win
 ```
 
@@ -54,6 +77,11 @@ npm run desktop:win
 checks keyboard tab synchronization and the LINE limitation panel, then closes
 normally. It does not sign in to any provider. It leaves its disposable profile
 in the operating system temporary directory, never in the user's normal profile.
+`test:session` uses five real Electron process starts and synthetic loopback data
+to check persistence, isolation, UI cancellation, failed deletion, blocked state
+after restart, retry and durable target-only clearing. Only native confirmation
+answers and one intentional API failure are mocked; storage and process restarts
+are real. It never signs in to any messenger account.
 See [acceptance.md](acceptance.md) for the evidence matrix and remaining gates.
 
 ## Installation and release constraints

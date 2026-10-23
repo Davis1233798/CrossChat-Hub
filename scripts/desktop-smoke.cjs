@@ -26,12 +26,20 @@ app.whenReady().then(async () => {
   await choose('5');
   if (await selected() !== 'line') throw new Error('Keyboard tab selection did not update the shell');
   if (!await window.webContents.executeJavaScript('!document.getElementById("line").hidden')) throw new Error('LINE limitation panel hidden');
+  if (!await window.webContents.executeJavaScript('document.getElementById("clear-profile").hidden')) throw new Error('Unsupported LINE exposes profile clearing');
   if (process.env.CROSSCHAT_SMOKE_SCREENSHOT) {
     const image = await window.webContents.capturePage();
     fs.writeFileSync(process.env.CROSSCHAT_SMOKE_SCREENSHOT, image.toPNG());
   }
   await choose('1');
   if (await selected() !== 'telegram') throw new Error('Web tab selection did not update the shell');
+  window.setSize(920, 620);
+  await delay(100);
+  if (!await window.webContents.executeJavaScript(`(() => {
+    const button = document.getElementById('clear-profile');
+    const bounds = button.getBoundingClientRect();
+    return !button.hidden && !button.disabled && bounds.width > 0 && bounds.right <= innerWidth;
+  })()`)) throw new Error('Local profile clearing control is not usable at minimum window width');
   const views = window.contentView.children;
   if (views.length !== 1) throw new Error(`Expected one attached remote view, got ${views.length}`);
   const contents = views[0].webContents;

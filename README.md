@@ -43,6 +43,7 @@ npm ci
 npm run check
 npm test
 npm run test:desktop
+npm run test:session
 npm run desktop
 ```
 
@@ -65,3 +66,11 @@ npm run desktop
 - 登入彈窗標題顯示目前來源；第三方登入網域不會獲得聊天平台的媒體／通知權限。
 - 修正 Ctrl/Cmd+數字切換後頁籤選取狀態未同步；加入使用獨立暫存資料目錄的 Electron 實際視窗 smoke test。
 - 最新測試範圍及未解阻礙請見 [驗收紀錄](docs/acceptance.md)。
+
+### 登入資料保留與清除
+
+- 關閉視窗、結束按鈕與系統退出共用正常關閉流程：停止分頁／登入彈窗後，寫入網站資料與 Cookie；超過 5 秒仍未完成則以失敗狀態結束，避免 EXE 無限鎖住。
+- 每個網頁平台有「清除登入」按鈕，確認後只清除該平台在此裝置的網站資料、登入 Cookie 與 HTTP 授權快取，並關閉該平台的彈窗與未完成下載。其他平台及已儲存附件不會刪除。
+- 失敗或中斷的清除會保留待處理標記；重啟後該平台仍暫停，需重試，不會宣稱已清除成功。
+- 此功能不是官方伺服器端的裝置授權撤銷。完整登出／裝置管理仍依平台官方功能操作。
+- 本機測試網站已驗證真正重啟後 Cookie、localStorage、IndexedDB 保留與隔離清除；**這不是 Telegram／Discord／Slack／WhatsApp 真人登入保留驗收**。
