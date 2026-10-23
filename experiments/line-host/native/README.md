@@ -22,6 +22,11 @@ focus, closing a child, and closing the host without residual processes.
 
 The worker chrome.windows.create path may bypass this callback entirely;
 GetDefaultClient only assigns a client and does not attach the resulting window.
+The experimental client now tracks all created browsers and asks every browser
+to close gracefully when the host window closes, including escaped worker
+windows. It preserves upstream OnBeforeClose bookkeeping and never force-kills
+the process. This guard compiled successfully; cancellation, re-entry and
+residual-process behavior still require live tests.
 Extension registration/readiness is still handled manually as described by the
 baseline README. Multi-view close lifecycle and popup restoration are unverified.
 Do not use this host for account login or real messages. It has not been launched

@@ -3,6 +3,8 @@
 // CrossChat changes: synthetic-only same-window popup diagnostic, not LINE support.
 #include "tests/cefsimple/simple_app.h"
 #include <iostream>
+#include <algorithm>
+#include <vector>
 #include "include/cef_command_line.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_fill_layout.h"
@@ -12,9 +14,38 @@
 
 namespace {
 constexpr char kProbe[] = "chrome-extension://hcmjeeijoifmcgjhocekmfmepgijdjgb/probe.html";
+class HostClient : public SimpleHandler {
+ public:
+  HostClient() : SimpleHandler(false) {}
+  void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+    SimpleHandler::OnAfterCreated(browser);
+    browsers_.push_back(browser);
+  }
+  void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
+    CEF_REQUIRE_UI_THREAD();
+    browsers_.erase(std::remove_if(browsers_.begin(), browsers_.end(),
+        [&](const CefRefPtr<CefBrowser>& item) { return item->IsSame(browser); }),
+        browsers_.end());
+    SimpleHandler::OnBeforeClose(browser);
+  }
+  bool TryCloseAll() {
+    CEF_REQUIRE_UI_THREAD();
+    // Do not short-circuit: every child must receive the graceful-close request,
+    // including a worker-created top-level browser that escaped our Views.
+    const auto snapshot = browsers_;
+    bool ready = true;
+    for (const auto& browser : snapshot) {
+      if (!browser->GetHost()->TryCloseBrowser()) ready = false;
+    }
+    return ready;
+  }
+ private:
+  std::vector<CefRefPtr<CefBrowser>> browsers_;
+};
 class HostWindow : public CefWindowDelegate {
  public:
-  explicit HostWindow(CefRefPtr<CefBrowserView> view) : view_(view) {}
+  HostWindow(CefRefPtr<CefBrowserView> view, CefRefPtr<HostClient> client)
+      : view_(view), client_(client) {}
   void OnWindowCreated(CefRefPtr<CefWindow> window) override {
     window->SetToFillLayout();
     window->AddChildView(view_);
@@ -22,14 +53,14 @@ class HostWindow : public CefWindowDelegate {
     window->Show();
   }
   bool CanClose(CefRefPtr<CefWindow>) override {
-    auto browser = view_ ? view_->GetBrowser() : nullptr;
-    return !browser || browser->GetHost()->TryCloseBrowser();
+    return client_->TryCloseAll();
   }
   void OnWindowDestroyed(CefRefPtr<CefWindow>) override { view_ = nullptr; }
   CefSize GetPreferredSize(CefRefPtr<CefView>) override { return CefSize(1000, 700); }
   cef_runtime_style_t GetWindowRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
  private:
   CefRefPtr<CefBrowserView> view_;
+  CefRefPtr<HostClient> client_;
   IMPLEMENT_REFCOUNTING(HostWindow);
 };
 class EmbeddedPopup : public CefBrowserViewDelegate {
@@ -61,11 +92,11 @@ class EmbeddedPopup : public CefBrowserViewDelegate {
 SimpleApp::SimpleApp() = default;
 void SimpleApp::OnContextInitialized() {
   CEF_REQUIRE_UI_THREAD();
-  auto handler = new SimpleHandler(false);
+  CefRefPtr<HostClient> handler = new HostClient();
   CefBrowserSettings settings;
   auto view = CefBrowserView::CreateBrowserView(handler, kProbe, settings,
                                                nullptr, nullptr, new EmbeddedPopup());
-  CefWindow::CreateTopLevelWindow(new HostWindow(view));
+  CefWindow::CreateTopLevelWindow(new HostWindow(view, handler));
 }
 CefRefPtr<CefClient> SimpleApp::GetDefaultClient() {
   // Worker-created windows may bypass the popup Views callback entirely.
