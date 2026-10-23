@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; object-src 'none'; form-action 'none'">
+<title>CrossChat Hub</title>
+<link rel="stylesheet" href="./shell.css">
+<script src="./shell.js" defer></script>
+</head>
+<body>
+<div class="chrome">
+  <div class="app-title"><span class="logo">↔</span><b>CrossChat Hub</b><span class="build">多平台聊天工作區 · 開發預覽</span></div>
+  <nav aria-label="聊天平台" id="tabs">
+    <button type="button" class="tab selected" data-tab="telegram" aria-selected="true" role="tab">Telegram</button>
+    <button type="button" class="tab" data-tab="discord" aria-selected="false" role="tab">Discord</button>
+    <button type="button" class="tab" data-tab="slack" aria-selected="false" role="tab">Slack</button>
+    <button type="button" class="tab" data-tab="whatsapp" aria-selected="false" role="tab">WhatsApp</button>
+    <button type="button" class="tab" data-tab="line" aria-selected="false" role="tab">LINE</button>
+    <span class="spacer"></span>
+    <button type="button" id="reload" title="重新載入目前的網站" aria-label="重新載入">↻</button>
+    <button type="button" id="quit" title="完全結束程式" aria-label="結束程式">結束</button>
+  </nav>
+  <div class="status"><span id="indicator" aria-hidden="true"></span><span id="status">選擇平台登入；登入資料儲存在各平台獨立的本機 Session</span></div>
+</div>
+<main id="native-content" aria-live="polite">
+  <section id="line" class="native-panel" hidden>
+    <div class="mark">LINE</div>
+    <h1>LINE 個人聊天尚無法內嵌</h1>
+    <p>LINE 官方在 Windows／macOS 提供桌面應用程式，以及 Google Chrome 專用的 LINE 擴充功能；沒有可安全直接載入的標準網頁聊天網址。Electron 無法保證相容 Chrome 商店擴充功能。</p>
+    <p><strong>此分頁目前不能收發 LINE 私人訊息。</strong> 不會要求在非官方表單中輸入 LINE 密碼，也不會假裝 LINE Login 等同個人聊天登入。</p>
+    <div class="buttons"><button type="button" data-line-link="desktop">開啟 LINE 官方下載</button><button type="button" data-line-link="chrome" class="secondary">開啟官方 Chrome 擴充功能</button></div>
+    <small>其他四個分頁會使用各平台官方網頁介面。能否成功登入仍取決於平台是否允許使用 Electron 內嵌 Chromium。</small>
+  </section>
+  <section id="connecting" class="native-panel"><div class="spinner"></div><h2>載入官方聊天網站中</h2><p>首次使用請依該平台自己的登入流程完成驗證。</p></section>
+</main>
+</body>
+</html>
