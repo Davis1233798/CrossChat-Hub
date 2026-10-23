@@ -4,6 +4,7 @@
 #include "tests/cefsimple/simple_app.h"
 #include <iostream>
 #include <algorithm>
+#include <limits>
 #include <vector>
 #include "include/cef_command_line.h"
 #include "include/views/cef_browser_view.h"
@@ -65,6 +66,32 @@ class HostWindow : public CefWindowDelegate {
 };
 class EmbeddedPopup : public CefBrowserViewDelegate {
  public:
+  void OnBrowserDestroyed(CefRefPtr<CefBrowserView> view,
+                          CefRefPtr<CefBrowser>) override {
+    CEF_REQUIRE_UI_THREAD();
+    const auto item = std::find_if(popups_.begin(), popups_.end(),
+        [&](const AttachedPopup& popup) { return popup.view == view; });
+    if (item == popups_.end()) return;
+    // The upstream lifespan handler only tracks browsers. An empty overlay
+    // must also leave the Views hierarchy or it can obscure the opener.
+    auto window = item->window;
+    popups_.erase(item);
+    if (!window || !window->IsValid()) return;
+    if (view->IsValid() && view->GetParentView() == window) {
+      window->RemoveChildView(view);
+    }
+    window->Layout();
+    // The opener may itself have closed. Restore the uppermost live view,
+    // rather than retaining an opener reference that outlives its browser.
+    for (size_t count = window->GetChildViewCount(); count > 0; --count) {
+      if (count - 1 > static_cast<size_t>(std::numeric_limits<int>::max())) return;
+      auto remaining = window->GetChildViewAt(static_cast<int>(count - 1))->AsBrowserView();
+      if (remaining && remaining->GetBrowser()) {
+        remaining->RequestFocus();
+        break;
+      }
+    }
+  }
   bool OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView> opener,
                                 CefRefPtr<CefBrowserView> popup,
                                 bool is_devtools) override {
@@ -77,6 +104,7 @@ class EmbeddedPopup : public CefBrowserViewDelegate {
     // Fill layout gives both views the same bounds; show the popup above opener.
     // Closing the popup should expose opener. This is deliberately not tab UX.
     window->AddChildView(popup);
+    popups_.push_back({popup, window});
     window->Layout();
     popup->RequestFocus();
     std::clog << "{\"event\":\"popup-attached\",\"sameViewsWindow\":"
@@ -86,6 +114,11 @@ class EmbeddedPopup : public CefBrowserViewDelegate {
   }
   cef_runtime_style_t GetBrowserRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
  private:
+  struct AttachedPopup {
+    CefRefPtr<CefBrowserView> view;
+    CefRefPtr<CefWindow> window;
+  };
+  std::vector<AttachedPopup> popups_;
   IMPLEMENT_REFCOUNTING(EmbeddedPopup);
 };
 }

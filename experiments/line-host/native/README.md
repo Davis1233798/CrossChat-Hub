@@ -29,6 +29,13 @@ the process. This guard compiled successfully; cancellation, re-entry and
 residual-process behavior still require live tests.
 Extension registration/readiness is still handled manually as described by the
 baseline README. Multi-view close lifecycle and popup restoration are unverified.
+The popup delegate now remembers each attachment's parent window and removes its
+overlay in `OnBrowserDestroyed`, before upstream lifespan bookkeeping runs. It
+then requests focus for the uppermost remaining live BrowserView. This avoids
+leaving cleanup to SimpleHandler, which only tracks browsers, and avoids keeping
+a stale opener browser for focus restoration. A destroyed/detached view or window
+is checked before hierarchy access. This follow-up compiled and linked on Windows
+x64 Release with the same pinned CEF build; close/focus behavior is still untested.
 Do not use this host for account login or real messages. It has not been launched
 or visually verified, does not implement tabs, and is excluded from packaging.
 
