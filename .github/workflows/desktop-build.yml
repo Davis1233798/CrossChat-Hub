@@ -83,6 +83,10 @@ jobs:
         if: matrix.platform == 'win'
         shell: pwsh
         run: ./scripts/windows-install-smoke.ps1
+      - name: Independent MSI clean installation, launch, relaunch and removal
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: ./scripts/windows-msi-smoke.ps1
       - name: Verify macOS DMG, install copy, native window, normal quit and relaunch
         if: matrix.platform == 'mac'
         shell: bash
