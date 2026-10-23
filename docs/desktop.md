@@ -2,7 +2,7 @@
 
 ## Implementation choice
 
-v0.2 is **Electron (Chromium + Node.js)** so the existing encrypted SQLite store,
+v0.2.1 is **Electron (Chromium + Node.js)** so the existing encrypted SQLite store,
 verified webhook ingress, and tested sender code are reused without a risky port.
 The resulting packaged desktop app includes its runtime: the end user does **not**
 need a separate Node.js installation. This is a real native window rather than just
@@ -95,3 +95,30 @@ outbound WebSocket so it does not require public inbound HTTPS for regular messa
   enablement, and the privileged Message Content intent to read normal guild text.
 - Discord Bot installation is separate from a user's OAuth identity verification.
 - `@line:alice` is a routed bot notification, not a native Discord mention.
+
+## GitHub preview releases (v0.2.1+)
+
+The `.github/workflows/desktop-build.yml` workflow now tests and builds on three
+independent GitHub-hosted runners: Windows x64, macOS Intel x64, macOS Apple Silicon
+arm64. It creates a **prerelease** with MSI/EXE for Windows and separate DMG/ZIP
+for each Mac architecture, only after all three installers build successfully.
+
+- Trigger: a push to `main` with a new `package.json` version, or a matching `v*` tag.
+- Manual `workflow_dispatch` builds artifacts but does not publish a release.
+- An existing release tag is not overwritten. Bump `package.json` before the next release.
+- The first preview can be published automatically without manually creating a tag.
+- GitHub Actions must have permission to create releases (`contents: write`).
+- Builds are **unsigned and unnotarized** until publisher certificates and signing
+  secrets are configured. Expect SmartScreen/Gatekeeper prompts; do not bypass OS
+  protections on a production device just to install this preview.
+- MSI does not support electron-updater based autoupdates. Ship a new MSI per version.
+- Build runners must reach npm and Electron's binary downloads. No packages
+  are currently cached or bundled into this repository.
+
+To build manually on the appropriate operating system after `npm install`:
+
+```bash
+npm run desktop:win:msi    # Windows x64 MSI
+npm run desktop:mac:intel  # Intel Mac x64 DMG + ZIP
+npm run desktop:mac:arm    # Apple Silicon arm64 DMG + ZIP
+```

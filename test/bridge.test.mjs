@@ -131,4 +131,9 @@ test('HTTP admin auth, create identities, encrypted connections, Telegram webhoo
   const webhook = `${url}${conn.webhook_path}`;
   assert.equal((await fetch(webhook, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(event) })).status, 401);
   for (let i = 0; i < 2; i++) {
-    const wh = await fetch(webhook, { method: 'POST', headers: { 'x-telegram-bot-api-secret-token': credentials.telegram.webhook_secret }, body: JSON.stringify(eve
+    const wh = await fetch(webhook, { method: 'POST', headers: { 'x-telegram-bot-api-secret-token': credentials.telegram.webhook_secret }, body: JSON.stringify(event) });
+    assert.equal(wh.status, 200);
+  }
+  assert.equal(db.listMessages().length, 1);
+  assert.equal(db.listDeliveries().length, 1);
+});

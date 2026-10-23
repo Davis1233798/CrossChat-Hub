@@ -126,3 +126,12 @@ gh repo create crosschat-hub --private --source=. --remote=origin --push
 ```
 
 MIT licensed. [Architecture](docs/architecture.md) · [Desktop instructions](docs/desktop.md) · [Roadmap](docs/roadmap.md).
+
+## Pre-release downloads (Windows / macOS)
+
+See [GitHub Releases](https://github.com/Davis1233798/CrossChat-Hub/releases).
+The v0.2.1 packaging workflow produces a Windows x64 `.msi` installer (plus `.exe`)
+and separate macOS Intel x64 / Apple Silicon arm64 `.dmg` images (plus `.zip`).
+It publishes a GitHub prerelease only when all OS builds succeed.
+These are **unsigned development previews**, not Apple-notarized production builds.
+See [desktop packaging instructions](docs/desktop.md) for restrictions.
