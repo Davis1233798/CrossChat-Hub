@@ -33,6 +33,10 @@ Top-level navigations, server redirects and nested popups share one policy:
 - Slack additionally permits exact Google, Microsoft and Apple authentication
   hosts listed in `desktop/navigation.cjs`. This is configuration, not verified
   SSO compatibility. Custom enterprise identity providers are not supported yet.
+  Google also [lists `accounts.youtube.com` as an authentication URL](https://knowledge.workspace.google.com/admin/getting-started/set-up-a-google-workspace-host-name-allowlist);
+  this exact host is permitted for Slack, without permitting YouTube browsing.
+  The reported external-browser prompt is covered by navigation regression tests;
+  completing the real Google-to-Slack sign-in flow remains unverified.
 - Other HTTPS destinations require confirmation before opening the system browser.
 - Non-HTTPS destinations, credentials in URLs and nonstandard ports are blocked.
 - Authentication popups show their current origin in the native title bar.

@@ -4,7 +4,10 @@ const { isOfficialOrigin } = require('./permissions.cjs');
 // Authentication pages may keep their opener, but never receive native APIs or
 // device permissions. Custom enterprise IdPs require explicit future support.
 const AUTH_HOSTS = Object.freeze({
-  slack: ['accounts.google.com', 'login.microsoftonline.com', 'login.live.com', 'appleid.apple.com'],
+  // Google lists accounts.youtube.com as an additional authentication URL:
+  // https://knowledge.workspace.google.com/admin/getting-started/set-up-a-google-workspace-host-name-allowlist
+  // Keep this exact account host scoped to Slack's Google sign-in flow.
+  slack: ['accounts.google.com', 'accounts.youtube.com', 'login.microsoftonline.com', 'login.live.com', 'appleid.apple.com'],
   discord: [], telegram: [], whatsapp: [],
 });
 function navigationTarget(serviceId, value) {

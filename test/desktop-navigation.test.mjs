@@ -45,6 +45,44 @@ test('top-level navigation and redirects are blocked before leaving allowed orig
   assert.equal(iframe.prevented, false);
 });
 
+test('Slack Google authentication keeps the exact YouTube accounts host inside its isolated flow', () => {
+  const accountUrl = 'https://accounts.youtube.com/accounts/SetSID';
+  assert.equal(navigationTarget('slack', accountUrl), 'internal');
+  assert.equal(navigationTarget('slack', 'https://accounts.youtube.com:443/'), 'internal');
+  for (const id of ['discord', 'telegram', 'whatsapp', 'line', 'unknown']) {
+    assert.equal(navigationTarget(id, accountUrl), 'external');
+  }
+  for (const url of [
+    'https://youtube.com/', 'https://www.youtube.com/', 'https://m.youtube.com/',
+    'https://accounts.youtube.com.evil.test/', 'https://evil.accounts.youtube.com/',
+    'https://accounts-youtube.com/',
+  ]) assert.equal(navigationTarget('slack', url), 'external');
+  for (const url of [
+    'http://accounts.youtube.com/', 'https://accounts.youtube.com:8443/',
+    'https://user:secret@accounts.youtube.com/',
+  ]) assert.equal(navigationTarget('slack', url), 'deny');
+
+  const contents = new Contents();
+  const opened = [];
+  protectContents(contents, service, { openExternal: url => opened.push(url) });
+  for (const type of ['will-navigate', 'will-redirect']) {
+    const navigation = event();
+    contents.emit(type, navigation, accountUrl, false, true);
+    assert.equal(navigation.prevented, false);
+  }
+  const popup = contents.open({ url: accountUrl });
+  assert.equal(popup.action, 'allow');
+  assert.equal(popup.overrideBrowserWindowOptions.webPreferences.partition, service.partition);
+  const child = new Contents();
+  contents.emit('did-create-window', { webContents: child, isDestroyed: () => false, setTitle() {} });
+  const redirect = event();
+  child.emit('will-redirect', redirect, accountUrl, false, true);
+  assert.equal(redirect.prevented, false);
+  assert.equal(child.open({ url: accountUrl }).action, 'allow');
+  assert.equal(child.open({ url: 'https://www.youtube.com/' }).action, 'deny');
+  assert.deepEqual(opened, ['https://www.youtube.com/']);
+});
+
 test('nested popups inherit isolation and navigation guards and show authentication origin', () => {
   const contents = new Contents();
   const opened = [];
