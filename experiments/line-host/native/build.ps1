@@ -11,6 +11,12 @@ $revision = & git -C $projectRoot rev-parse HEAD
 if ($LASTEXITCODE -ne 0 -or $revision -ne $expectedRevision) {
   throw 'Expected pinned cef-project revision.'
 }
+# HEAD alone does not ensure that download/configuration logic is pinned.
+# The two sample overlays live under the ignored distribution, outside this check.
+& git -C $projectRoot diff --quiet HEAD -- CMakeLists.txt cmake
+if ($LASTEXITCODE -ne 0) {
+  throw 'Expected unchanged pinned upstream CMake configuration.'
+}
 $distribution = Join-Path $projectRoot "third_party/cef/cef_binary_${version}_windows64"
 $header = Get-Content -LiteralPath (Join-Path $distribution 'include/cef_version.h') -Raw
 if (!$header.Contains("#define CEF_VERSION `"$version`"")) {

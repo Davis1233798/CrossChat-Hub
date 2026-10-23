@@ -44,6 +44,7 @@ int RunMain(HINSTANCE hInstance,
       command_line->HasSwitch("disable-web-security") ||
       command_line->HasSwitch("ignore-certificate-errors") ||
       command_line->HasSwitch("user-data-dir") ||
+      command_line->HasSwitch("remote-debugging-pipe") ||
       command_line->HasSwitch("remote-debugging-port") ||
       command_line->HasSwitch("remote-debugging-address")) {
     return 2;
