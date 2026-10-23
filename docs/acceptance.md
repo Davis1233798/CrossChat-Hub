@@ -109,3 +109,18 @@ provider validation of the new storage lifecycle, installer migration,
 signing/notarization and custom enterprise SSO. Local persistence/clearing fixture
 evidence does not establish real provider logout, device revocation or server
 message retention. No formal Latest Release may be inferred from this work.
+
+## Latest storage lifecycle checkpoint
+
+Code commit `7c2ba1b`: 44 local unit/mock tests pass. The five-process synthetic
+session persistence/reset test passes locally after isolating test configuration
+to the loopback fixture before the desktop entrypoint loads. An unwritable reset
+intent now stops current profile writers without starting deletion; it cannot
+promise restart blocking when the disk itself refuses the marker write.
+
+Both installed macOS bundle launch/normal quit/relaunch checks passed at commit
+`ca6887a` in run 39952161980, but that matrix failed on Windows storage-fixture
+navigation competition. The fixture correction is commit `c284b17`; latest code
+verification is still running at:
+https://github.com/JackChen6203/CrossChat-Hub/actions/runs/39959022902
+Do not treat an earlier green packaging run as proof for the current code.
