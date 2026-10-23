@@ -125,7 +125,7 @@ verification is still running at:
 https://github.com/JackChen6203/CrossChat-Hub/actions/runs/39959022902
 Do not treat an earlier green packaging run as proof for the current code.
 
-## Verified current code checkpoint: b1871c5
+## Verified Electron product checkpoint: b1871c5
 
 The full desktop matrix passed at code commit `b1871c5`:
 https://github.com/JackChen6203/CrossChat-Hub/actions/runs/39959439955
@@ -151,3 +151,30 @@ is currently available. Real account login/send/receive/logout/restart retention
 LINE embedding, authorized cross-platform delivery, signing, prior-version updates
 and installer coexistence remain incomplete. Previous pending-status notes above
 are historical and superseded by this code-specific checkpoint.
+
+## Current LINE experiment checkpoint
+
+The separate, excluded-from-packaging CEF experiment at `eecfb5e` adds a pinned
+Windows x64 build, fresh-profile guard, synthetic readiness handshake, same-window
+ordinary-popup overlay and an independent official-store/pre-login mode. Both
+`line-prelogin` and `synthetic` configured, compiled and linked on Windows; the
+generated project switched the account-mode definition correctly. No new host
+was launched, so these builds prove neither extension readiness nor native UI
+behavior. The previous local launch rejection remains a runtime-specific
+blocker, not a reason to stop build/review work or replace LINE with another app.
+
+All 15 isolated fixture transport/readiness mock tests and fixture JavaScript
+syntax checks pass. They never start CEF or connect to a real messenger account.
+The earlier unmodified CEF baseline opened worker-created content in a separate
+native window; revised same-window, close/focus and readiness behavior remain
+unverified. Original LINE startup in the earlier unpacked probe failed with
+`ltsm_not_available`; official signed installation has not yet been tested.
+
+The pre-login mode provides only fixed official store/details/index navigation,
+rejects extension-loading/debugging switches and does not inspect account content.
+It must pass normal signed install, original-ID verification and original login
+UI inside the existing window before manual account acceptance is meaningful.
+It is fresh-profile-only and cannot establish persistent account sessions.
+See [pre-login gates](../experiments/line-host/native/LINE-PRELOGIN.md).
+No official extension payload, account data or credentials are tracked, and no
+five-platform release or real LINE login/send/receive/session/logout is claimed.

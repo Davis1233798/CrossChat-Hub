@@ -66,11 +66,12 @@ its two-path CEF runtime result remains pending. Earlier window observations
 below came from the original inspector.
 
 Run `node --test experiments/line-host/tests/*.test.mjs` from the repository root
-for eight isolated mock regressions. These execute the actual inspector with a
+for 15 isolated mock regressions. These execute the actual inspector with a
 substitute CDP transport, covering both paths and single-path selection, separate
 native window rejection, worker creation failure, socket closure, request timeout
 and cleanup. A worker test delays the initial storage write to verify that its
-capabilities response waits for initialization. The tests do not start CEF or
+capabilities response waits for initialization. Readiness tests reject missing,
+invalid or failed worker responses. The tests do not start CEF or
 connect to an endpoint and are **not evidence of native hosting or LINE support**.
 
 Observed fixture capabilities: worker initialized, local storage persisted its

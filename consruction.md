@@ -1,6 +1,6 @@
 # CrossChat Hub — Codex 開發交接與施工規格（consruction.md）
 
-> **LINE 優先決策（使用者最新要求）：** LINE 個人聊天同窗內嵌是最重要且不可省略的核心；其他平台不能替代交付。已委派三路調查並以原版 LINE Chrome 3.7.2 做隔離 Electron 45 初始化診斷，觀察到未定義 API 錯誤。官方 Chrome 版仍在提供；不能以無一般網頁版推論無解。下一個優先原型為 CEF Chrome-style Views 全外殼，尚未完成實測。詳見 `docs/line-feasibility.md`；不綑綁官方套件、不宣稱已登入或可傳訊。
+> **LINE 優先決策（使用者最新要求）：** LINE 個人聊天同窗內嵌是不可省略的核心，其他平台不能替代交付。CEF Chrome-style Views 已有自有 fixture、事件／握手 readiness 與獨立官方商店 pre-login 兩種原型；Windows x64 兩種模式均編譯／連結通過，15 項隔離 mock 通過，尚未執行新宿主。先前原版 LINE unpacked 探測仍有 `ltsm_not_available`，不能據此判定所有宿主無解。下一關是正常官方安裝保留身分、同窗原版啟動、使用者手動登入與真實收送。詳見 `docs/line-feasibility.md`、`experiments/line-host/native/LINE-PRELOGIN.md`；原型不含官方套件、不在產品打包內，未宣稱 LINE 可用。
 
 > **2026-10-23 接手開發補充：** 使用者已確認第五個服務沿用 WhatsApp。已在 `codex/messenger-development` 補強導航／redirect／遞迴彈窗限制、快捷鍵頁籤狀態同步、Electron 真實視窗 smoke、依賴鎖定及現行架構文件。本機 35 項測試、Windows MSI/NSIS/ZIP 打包與打包後視窗啟動／正常退出通過；未驗證安裝升級或真人聊天。完整分項證據見 `docs/acceptance.md`。下文原始交接現況保留作歷史基準，LINE 與真人 E2E 仍是正式發行阻礙。
 
