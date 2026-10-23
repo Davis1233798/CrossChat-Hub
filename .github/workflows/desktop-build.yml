@@ -75,6 +75,51 @@ jobs:
             compgen -G 'dist/*.zip' >/dev/null
           fi
           ls -lh dist/
+      - name: Smoke-test Windows installer, launch and graceful window close
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem dist -Filter 'CrossChat-Hub-*-win-x64.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'NSIS executable missing' }
+          $setup = Start-Process -FilePath $exe.FullName -ArgumentList '/S' -PassThru -Wait
+          if ($setup.ExitCode -ne 0) { throw "Silent installation failed with code $($setup.ExitCode)" }
+          $appPath = Join-Path $env:LOCALAPPDATA 'Programs\CrossChat Hub\CrossChat Hub.exe'
+          if (-not (Test-Path $appPath)) { throw "Installed EXE not found: $appPath" }
+          $running = Start-Process -FilePath $appPath -PassThru
+          try {
+            $window = [IntPtr]::Zero
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+              Start-Sleep -Milliseconds 500
+              $running.Refresh()
+              if ($running.HasExited) { throw "Desktop application exited unexpectedly: $($running.ExitCode)" }
+              $window = $running.MainWindowHandle
+              if ($window -ne [IntPtr]::Zero) { break }
+            }
+            if ($window -eq [IntPtr]::Zero) { throw 'Application did not create a desktop window' }
+            Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public class DesktopWindow {
+            [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+          }
+          '@
+            if (-not [DesktopWindow]::PostMessage($window, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) { throw 'Window close message could not be posted' }
+            if (-not $running.WaitForExit(12000)) { throw 'CrossChat Hub remained running after window close' }
+          } finally {
+            if (-not $running.HasExited) { Stop-Process -Id $running.Id -Force }
+          }
+      - name: Verify macOS DMG contains usable application bundle
+        if: matrix.platform == 'mac'
+        shell: bash
+        run: |
+          set -euo pipefail
+          disk_image="$(find dist -maxdepth 1 -name '*.dmg' -print -quit)"
+          mkdir -p "$RUNNER_TEMP/crosschat-mount"
+          hdiutil attach "$disk_image" -nobrowse -readonly -mountpoint "$RUNNER_TEMP/crosschat-mount"
+          trap 'hdiutil detach "$RUNNER_TEMP/crosschat-mount" -quiet || true' EXIT
+          test -x "$RUNNER_TEMP/crosschat-mount/CrossChat Hub.app/Contents/MacOS/CrossChat Hub"
+          plutil -lint "$RUNNER_TEMP/crosschat-mount/CrossChat Hub.app/Contents/Info.plist"
       - uses: actions/upload-artifact@v4
         with:
           name: crosschat-${{ matrix.artifact }}
