@@ -49,6 +49,15 @@ int RunMain(HINSTANCE hInstance,
       command_line->HasSwitch("remote-debugging-address")) {
     return 2;
   }
+#if defined(CROSSCHAT_LINE_PRELOGIN)
+  // This mode must never expose account content via a diagnostic listener or
+  // load an unpacked extension under a different identity.
+  if (command_line->HasSwitch("crosschat-diagnostics") ||
+      command_line->HasSwitch("load-extension") ||
+      command_line->HasSwitch("disable-extensions-except")) {
+    return 2;
+  }
+#endif
   const std::wstring requested =
       command_line->GetSwitchValue("crosschat-profile").ToWString();
   wchar_t temp[MAX_PATH];

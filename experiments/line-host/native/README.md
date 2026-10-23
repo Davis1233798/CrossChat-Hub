@@ -1,5 +1,9 @@
 # Same-window Views overlay (experimental)
 
+Select `-AppMode synthetic` explicitly. The separate [official-store/pre-login
+mode](LINE-PRELOGIN.md) is built with `-AppMode line-prelogin`; neither is production
+LINE support. Rebuilding replaces the scratch sample, never the repository sources.
+
 This source overlay replaces the pinned upstream sample's `simple_app.cc` and
 `cefsimple_win.cc`. The Windows entrypoint is committed here, including the
 profile and diagnostic settings; rebuilding no longer depends on edits hidden
@@ -17,6 +21,7 @@ From the CrossChat-Hub root, run:
 
 ```powershell
 & ./experiments/line-host/native/build.ps1 `
+  -AppMode synthetic `
   -CefProject ./build/bin/cef-project `
   -BuildDirectory ./build/bin/cef-project-build `
   -CMake 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
