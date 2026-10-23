@@ -13,5 +13,3 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run check
       - run: npm test
-      - name: Native Electron window and keyboard smoke (no provider login)
-        run: xvfb-run --auto-servernum npm run test:desktop

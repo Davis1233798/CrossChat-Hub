@@ -12,7 +12,7 @@ This is a development checkpoint, not approval for a production release.
 | `npm test` | 35 passed | Backend mock/local checks; navigation policy, redirects and nested popup behavior with fake WebContents |
 | `npm run test:desktop` | Pass on Windows 11 / Node 24.0.2 / Electron 45 | Real visible window, Ctrl+5 / Ctrl+1 shell selection, honest LINE panel, remote view Node disabled, normal window close with process exit code 0 |
 | Windows x64 build | MSI / NSIS EXE / ZIP produced | Build only; unsigned. Unpacked packaged EXE created a visible native window and exited normally with code 0 |
-| CI changes | Not yet run remotely | Node 24, lockfile install, Linux Xvfb native-window smoke; packaging includes `codex/**` branches |
+| CI changes | Remote verification pending | Node 24, lockfile install, native-window smoke on Windows/macOS packaging runners; packaging includes `codex/**` branches |
 
 The native-window harness uses a newly created OS temporary profile and does not
 touch existing messenger sessions. It inspects the local shell only. No account
@@ -31,6 +31,12 @@ visible MainWindowHandle. A normal interactive launch then passed window creatio
 and `CloseMainWindow` exit checks using a separate temporary user-data directory.
 Neither probe installs or upgrades the application. MSI/NSIS installation,
 upgrade/uninstall, and macOS builds have not been executed in this workspace.
+
+An initial Linux Xvfb CI smoke failed before application startup because the
+runner's Chromium SUID helper was not configured. Native-window smoke now runs
+on the actual supported Windows/macOS packaging targets instead; no `--no-sandbox`
+flag or runner privilege modification was introduced. Linux syntax/unit checks
+remain in the separate CI workflow.
 
 ## Platform matrix
 
