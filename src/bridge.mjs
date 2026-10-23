@@ -2,7 +2,7 @@ export const PLATFORMS = ['slack', 'telegram', 'line', 'discord'];
 
 // Deliberately require the destination platform: @line:alice, not ambiguous @alice.
 export function extractMentions(text) {
-  const pattern = /(^|[^\w])@(slack|telegram|line|discord):([a-z][a-z0-9_.-]{1,31})(?![a-z0-9_.-])/gi;
+  const pattern = /(^|[^\w])@(slack|telegram|line|discord):([a-z][a-z0-9_.-]{1,31})(?![a-z0-9_.-]|:)/gi;
   const matches = [...text.matchAll(pattern)];
   return [...new Map(matches.map(m => [`${m[2].toLowerCase()}:${m[3].toLowerCase()}`, { platform: m[2].toLowerCase(), alias: m[3].toLowerCase() }])).values()];
 }
