@@ -124,3 +124,30 @@ navigation competition. The fixture correction is commit `c284b17`; latest code
 verification is still running at:
 https://github.com/JackChen6203/CrossChat-Hub/actions/runs/39959022902
 Do not treat an earlier green packaging run as proof for the current code.
+
+## Verified current code checkpoint: b1871c5
+
+The full desktop matrix passed at code commit `b1871c5`:
+https://github.com/JackChen6203/CrossChat-Hub/actions/runs/39959439955
+Syntax/unit CI also passed:
+https://github.com/JackChen6203/CrossChat-Hub/actions/runs/39959439966
+
+- 44 unit/mock checks passed.
+- Windows, macOS Intel and macOS ARM passed the real-window smoke and five-process
+  synthetic persistence, cancellation, failure/restart/retry and isolated reset.
+- Windows NSIS clean install, running same-version reinstall, relaunch and running
+  uninstall passed; executable and processes were removed.
+- Independent Windows MSI clean install, two visible-window launches/normal exits
+  and uninstall passed. This does not verify MSI/NSIS coexistence or old-version upgrades.
+- Both macOS architectures built DMGs, copied the app to a disposable installation
+  directory, launched via Launch Services, checked on-screen windows, requested
+  normal quit, checked residual bundle processes and relaunched successfully.
+  This does not establish old-version update, Gatekeeper/notarization or real login.
+- Three unexpired Windows x64/macOS x64/macOS arm64 artifacts were confirmed.
+  Release publication was skipped.
+
+The user confirmed test accounts are available and no LINE authorization solution
+is currently available. Real account login/send/receive/logout/restart retention,
+LINE embedding, authorized cross-platform delivery, signing, prior-version updates
+and installer coexistence remain incomplete. Previous pending-status notes above
+are historical and superseded by this code-specific checkpoint.
