@@ -10,7 +10,7 @@ export async function startHub({ env = process.env, host = '127.0.0.1', port = 8
   try {
     const oauth = createOAuthManager({ store, env, fetchFn });
     gateway = new DiscordGatewayManager({ store, fetchFn, WebSocketClass });
-    app = createApp({ store, adminKey: env.ADMIN_API_KEY, oauth, gateway });
+    app = createApp({ store, adminKey: env.ADMIN_API_KEY, oauth, gateway, fetchFn });
     await new Promise((resolve, reject) => { app.once('error', reject); app.listen(port, host, resolve); });
     const actualPort = app.address().port;
     if (!env.OAUTH_CALLBACK_BASE_URL) env.OAUTH_CALLBACK_BASE_URL = `http://${host}:${actualPort}`;

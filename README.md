@@ -1,17 +1,40 @@
-# CrossChat Hub v0.2 — Windows / macOS 跨平台聊天中台
+# CrossChat Hub v0.3 — User-first Windows / macOS Messaging Desktop
 
-Desktop-first messaging bridge for **Slack / Telegram / LINE / Discord**.
-Uses official Bot APIs to route `@platform:alias` notifications, store messages,
-and bridge explicitly selected chat rooms in one or both directions.
+CrossChat Hub is moving from an administrator-oriented Bot gateway to a **user-facing,
+multiple-account desktop client**. The first screen is now **Sign in to your accounts**;
+Bot secrets, Webhooks, custom identity aliases and bridge rules are available only within
+an expandable **Developer / Advanced Integration** area.
 
-## Status
+## User login and honest platform capabilities
 
-- **Cross-platform desktop source:** Electron 45 + embedded Node 24, Windows/macOS packaging scripts.
-- **Core functionality:** API adapters, multi-connection store, Slack OAuth, Discord OAuth verification,
-  Discord Gateway receiver, explicit channel-to-channel text bridge rules, persistent outbox.
-- **Validated locally:** Node tests and syntax checks with mock providers.
-- **Not yet validated:** Electron runtime / Windows `.exe` / macOS `.dmg` or real external
-  app credentials. These require an environment with npm registry access and real provider accounts.
+| Platform | End-user sign-in | Personal chat support in v0.3 |
+| --- | --- | --- |
+| Slack | OAuth **user** token (app registration required once) | List permitted rooms, read 50 recent messages, send to a permitted room |
+| Discord | Official OAuth `identify` | **Identity only**, cannot read/impersonate personal DMs |
+| LINE | Official LINE Login (profile/openid) | **Identity only**, no access to personal LINE chat via LINE Login |
+| Telegram | Official MTProto/TDLib possible | **Not implemented yet**: v0.3 does not offer fake Telegram QR/phone login |
+
+The existing Bot-based channel-to-channel bridges and mention notifications still exist,
+but are **advanced integrations** rather than login. Never use ordinary account passwords,
+third-party browser cookies or personal Discord tokens to simulate unsupported APIs.
+
+**OAuth application setup is an operator/developer responsibility**. End users never type Bot
+Tokens or Webhook Secrets into the sign-in screen. A desktop binary alone cannot
+secretly ship a third-party OAuth app's `client_secret` safely. Set up provider OAuth
+client IDs/secrets in the desktop app's user settings or use a secure hosted OAuth
+broker. Some providers require a public HTTPS callback, not loopback HTTP; that must
+be provisioned separately.
+
+At present, `@platform:alias` routes through explicitly authorized Bot/channel
+connections. An identity-only LINE or Discord login **does not** enable delivery
+as that user. Real cross-platform personal-chat synchronization depends on platform
+permissions and is not implemented across all providers.
+
+## Verification
+
+- 19 Node unit / integration tests pass with mocked providers and in-memory SQLite.
+- External live OAuth and personal chat sessions require real developer apps and accounts.
+- Builds are unsigned preview binaries; runtime installation needs on-device testing.
 
 ## Quick start — Web/daemon mode (Node.js >= 22.13)
 
@@ -44,7 +67,7 @@ The workflow [.github/workflows/desktop-build.yml](.github/workflows/desktop-bui
 can package **unsigned** Windows/macOS installers on GitHub-hosted runners.
 These binaries must be signed/notarized before normal public distribution.
 
-## Features
+## Advanced integration features (not user sign-in)
 
 | Platform | Inbound | Outbound | OAuth |
 |---|---|---|---|
@@ -71,7 +94,7 @@ Create rule `Discord bot + channel A → Telegram bot + group B` and another rul
 listed source rooms are relayed. Bot-generated messages are ignored to reduce loops.
 Only text is forwarded; media, threads, edits and reactions are not included.
 
-### OAuth and Gateway
+### Advanced Bot OAuth and Gateway
 
 Set `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`,
 `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `OAUTH_CALLBACK_BASE_URL` in the server
@@ -91,7 +114,7 @@ and in the connection configuration. Official scope limitations apply.
 ```text
 desktop/                 Electron main process + isolated preload
 src/app.mjs              HTTP API, webhooks, OAuth callbacks, bridge rules
-src/oauth.mjs            Slack/Discord OAuth, state/PKCE, Slack refresh
+src/oauth.mjs            Slack user/Bot OAuth, LINE profile OAuth, Discord identify, state/PKCE
 src/gateway.mjs          Discord Gateway v10 heartbeat/reconnect/resume
 src/bridge.mjs           Cross-platform mentions, room bridges, API senders
 src/store.mjs            SQLite migrations, encrypted connections and outbox

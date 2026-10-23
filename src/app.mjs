@@ -17,6 +17,22 @@ const securityHeaders = {
 const problem = (code, message) => Object.assign(new Error(message), { status: code });
 const validId = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
 const validText = (v, max = 200) => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
+const validSlackChannel = v => typeof v === 'string' && /^[A-Z0-9]{3,32}$/.test(v);
+
+async function slackRequest(connection, method, params, fetchFn) {
+  const url = new URL(`https://slack.com/api/${method}`);
+  const isPost = method === 'chat.postMessage';
+  if (!isPost) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+  const response = await fetchFn(url.toString(), { method: isPost ? 'POST' : 'GET',
+    headers: { authorization: `Bearer ${connection.credentials.token}`, ...(isPost ? { 'content-type': 'application/json' } : {}) },
+    ...(isPost ? { body: JSON.stringify(params) } : {}),
+    redirect: 'error', signal: AbortSignal.timeout(10000),
+  });
+  if (!response.ok) throw problem(502, `Slack HTTP ${response.status}`);
+  const result = await response.json();
+  if (!result.ok) throw problem(502, `Slack API: ${String(result.error ?? 'failed').slice(0, 80)}`);
+  return result;
+}
 
 async function readBody(req) {
   let bytes = 0;
@@ -49,7 +65,7 @@ function cleanCredentials(platform, obj) {
   };
 }
 
-export function createApp({ store, adminKey, oauth = null, gateway = null }) {
+export function createApp({ store, adminKey, oauth = null, gateway = null, fetchFn = fetch }) {
   if (!/^[a-f0-9]{64}$/i.test(adminKey ?? '')) throw new Error('ADMIN_API_KEY must be a 32-byte hex string');
   const handle = async (req, res) => {
     Object.entries(securityHeaders).forEach(([k, v]) => res.setHeader(k, v));
@@ -89,7 +105,7 @@ export function createApp({ store, adminKey, oauth = null, gateway = null }) {
         return respond(200, { ok: true });
       }
 
-      const oauthCallback = path.match(/^\/oauth\/(slack|discord)\/callback$/);
+      const oauthCallback = path.match(/^\/oauth\/(slack|discord|line)\/callback$/);
       if (method === 'GET' && oauthCallback && oauth) {
         try {
           await oauth.complete(oauthCallback[1], Object.fromEntries(requestURL.searchParams));
@@ -101,6 +117,31 @@ export function createApp({ store, adminKey, oauth = null, gateway = null }) {
       }
       if (!path.startsWith('/api/')) throw problem(404, 'Not found');
       if (!equal(req.headers.authorization, `Bearer ${adminKey}`)) throw problem(401, 'Invalid admin credential');
+      const slackAccount = path === '/api/user/slack/rooms' || path === '/api/user/slack/messages';
+      if (slackAccount) {
+        const payload = method === 'POST' ? decodeJson(await readBody(req)) : Object.fromEntries(requestURL.searchParams);
+        const conn = store.getConnection(payload.connection_id);
+        if (!conn || conn.platform !== 'slack' || conn.credentials.kind !== 'user') throw problem(404, 'Authorized Slack user account not found');
+        const account = oauth ? await oauth.refreshSlack(conn) : conn;
+        if (path.endsWith('/rooms') && method === 'GET') {
+          const result = await slackRequest(account, 'conversations.list', {
+            types: 'public_channel,private_channel,im,mpim', limit: '200', exclude_archived: 'true',
+          }, fetchFn);
+          return respond(200, { rooms: (result.channels ?? []).map(c => ({ id: c.id, name: c.name ?? c.user ?? c.id,
+            is_private: Boolean(c.is_private), is_im: Boolean(c.is_im), unread_count: c.unread_count ?? 0 })) });
+        }
+        if (!validSlackChannel(payload.channel)) throw problem(400, 'Invalid Slack channel ID');
+        if (method === 'GET') {
+          const result = await slackRequest(account, 'conversations.history', { channel: payload.channel, limit: 50 }, fetchFn);
+          return respond(200, { messages: (result.messages ?? []).map(m => ({ ts: m.ts, user: m.user ?? 'Unknown', text: m.text ?? '' })) });
+        }
+        if (method === 'POST') {
+          if (!validText(payload.text, 3500)) throw problem(400, 'Message text is required');
+          const result = await slackRequest(account, 'chat.postMessage', { channel: payload.channel, text: payload.text, unfurl_links: false }, fetchFn);
+          return respond(200, { ok: true, ts: result.ts });
+        }
+        throw problem(405, 'Unsupported method');
+      }
       if (method === 'GET') {
         if (path === '/api/connections') return respond(200, store.listConnections());
         if (path === '/api/identities') return respond(200, store.listIdentities());
@@ -110,7 +151,7 @@ export function createApp({ store, adminKey, oauth = null, gateway = null }) {
         if (path === '/api/bridge-rules') return respond(200, store.listBridgeRules());
         if (path === '/api/verified-accounts') return respond(200, store.listVerifiedAccounts());
         if (path === '/api/gateway') return respond(200, gateway?.status() ?? []);
-        if (path === '/api/oauth/config') return respond(200, { slack: oauth?.configured('slack') ?? false, discord: oauth?.configured('discord') ?? false });
+        if (path === '/api/oauth/config') return respond(200, { slack: oauth?.configured('slack') ?? false, discord: oauth?.configured('discord') ?? false, line: oauth?.configured('line') ?? false });
         if (path === '/api/oauth/discord/install' && oauth) { try { return respond(200, { url: oauth.discordInstallUrl() }); } catch { throw problem(400, 'Discord application is not configured'); } }
       }
       if (method === 'DELETE') {
@@ -142,7 +183,7 @@ export function createApp({ store, adminKey, oauth = null, gateway = null }) {
         if (data.source_connection_id === data.target_connection_id && data.source_room_id === data.target_room_id) throw problem(400, 'A room cannot be bridged to itself');
         return respond(201, store.addBridgeRule(data.source_connection_id, data.source_room_id, data.target_connection_id, data.target_room_id));
       }
-      if (path === '/api/oauth/slack/start' || path === '/api/oauth/discord/start') {
+      if (path === '/api/oauth/slack/start' || path === '/api/oauth/discord/start' || path === '/api/oauth/line/start') {
         if (!oauth) throw problem(503, 'OAuth is unavailable');
         const provider = path.split('/')[3];
         try { return respond(200, { url: oauth.begin(provider, data) }); }

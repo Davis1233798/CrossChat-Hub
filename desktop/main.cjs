@@ -11,7 +11,8 @@ const authorizedOAuthURL = raw => {
     const u = new URL(raw);
     return u.protocol === 'https:' && (
       (u.hostname === 'slack.com' && u.pathname === '/oauth/v2/authorize') ||
-      (u.hostname === 'discord.com' && u.pathname === '/oauth2/authorize')
+      (u.hostname === 'discord.com' && u.pathname === '/oauth2/authorize') ||
+      (u.hostname === 'access.line.me' && u.pathname === '/oauth2/v2.1/authorize')
     );
   } catch { return false; }
 };

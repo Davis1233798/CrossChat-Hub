@@ -122,3 +122,51 @@ npm run desktop:win:msi    # Windows x64 MSI
 npm run desktop:mac:intel  # Intel Mac x64 DMG + ZIP
 npm run desktop:mac:arm    # Apple Silicon arm64 DMG + ZIP
 ```
+
+
+## v0.3: User-first sign-in and platform limitations
+
+When the desktop app starts, the primary screen shows **Telegram, Slack, Discord and LINE
+account cards**. Developer-only Bot Token/Webhook forms and manual alias mapping are
+behind an expandable Advanced Integration section. After OAuth identity verification,
+accounts appear in the account list. This is not proof that third-party chat content
+is accessible.
+
+- **Slack:** the sign-in button requests a *user* OAuth token with `user_scope`.
+  Given approved scopes and workspace access, the Slack panel lists channels,
+  loads 50 messages and can send text messages. Errors from Slack permission policy
+  are surfaced; no history or messages are simulated. Slack user tokens are encrypted
+  using the existing AES-GCM encrypted SQLite credentials store.
+- **Discord:** `identify` provides verified username and ID only; account tokens are
+  discarded. No user-message automation, no self-bot or cookie scraping.
+- **LINE:** LINE Login obtains the profile via the provider's HTTPS endpoint and
+  discards the access token after verification. No personal chat API is available;
+  signing in will **not** import personal LINE messages or send on the user's behalf.
+- **Telegram:** personal login has **not yet been implemented**. Future supported
+  client work requires official MTProto/TDLib authentication, encrypted local
+  sessions, 2FA and account logout. The existing Bot API is not a substitute.
+
+Developer configuration example in the desktop profile `settings.json`:
+
+```json
+{
+  "SLACK_CLIENT_ID": "your-client-id",
+  "SLACK_CLIENT_SECRET": "your-client-secret",
+  "DISCORD_CLIENT_ID": "your-discord-application-id",
+  "DISCORD_CLIENT_SECRET": "your-discord-client-secret",
+  "LINE_CLIENT_ID": "your-LINE-Login-channel-ID",
+  "LINE_CLIENT_SECRET": "your-LINE-Login-channel-secret",
+  "OAUTH_CALLBACK_BASE_URL": "https://your-registered-callback-origin.example"
+}
+```
+
+**Merge these keys into the existing settings file; do not delete/recreate
+`ADMIN_API_KEY` or `ENCRYPTION_KEY`, which protect the stored data.**
+The HTTPS callback above must be actually routed back to the **same local
+running application** holding the OAuth state, or handled by a purpose-built
+secure hosted OAuth broker; simply placing an arbitrary URL there will not work.
+Register `/oauth/line/callback`, `/oauth/discord/callback`, and `/oauth/slack/callback`
+with the exact matching provider application.
+
+Do not ask users for their LINE, Discord, Telegram or Slack passwords within
+CrossChat Hub. Use official authorization screens.

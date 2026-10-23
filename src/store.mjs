@@ -122,11 +122,16 @@ export function createStore(path, encryptionKey) {
     removeBridgeRule(id) { return q('DELETE FROM bridge_rules WHERE id=?').run(id).changes > 0; },
     listVerifiedAccounts: () => q('SELECT * FROM verified_accounts ORDER BY verified_at DESC').all(),
     recordVerifiedAccount(provider, userId, displayName, identityId = null, connectionId = null) {
-      const id = randomUUID();
-      q(`INSERT INTO verified_accounts(id,provider,external_user_id,display_name,identity_id,connection_id)
-        VALUES(?,?,?,?,?,?) ON CONFLICT(provider,external_user_id,connection_id)
-        DO UPDATE SET display_name=excluded.display_name,verified_at=CURRENT_TIMESTAMP`).run(id,provider,userId,displayName,identityId,connectionId);
-      return q('SELECT * FROM verified_accounts WHERE provider=? AND external_user_id=? AND connection_id IS ?').get(provider,userId,connectionId);
+      // SQLite considers NULL values distinct in UNIQUE constraints. Match a
+      // provider's standalone identity without creating duplicates on each login.
+      const current = connectionId == null
+        ? q('SELECT id FROM verified_accounts WHERE provider=? AND external_user_id=? AND connection_id IS NULL LIMIT 1').get(provider, userId)
+        : q('SELECT id FROM verified_accounts WHERE provider=? AND external_user_id=? AND connection_id=? LIMIT 1').get(provider, userId, connectionId);
+      const id = current?.id ?? randomUUID();
+      if (current) q('UPDATE verified_accounts SET display_name=?,verified_at=CURRENT_TIMESTAMP WHERE id=?').run(displayName,id);
+      else q('INSERT INTO verified_accounts(id,provider,external_user_id,display_name,identity_id,connection_id) VALUES(?,?,?,?,?,?)')
+        .run(id,provider,userId,displayName,identityId,connectionId);
+      return q('SELECT * FROM verified_accounts WHERE id=?').get(id);
     },
     nextDeliveries: (limit = 10) => q("SELECT * FROM deliveries WHERE status='pending' AND next_attempt_at<=? ORDER BY created_at LIMIT ?").all(Date.now(), limit),
     finishDelivery: id => q("UPDATE deliveries SET status='sent',attempts=attempts+1,last_error=NULL WHERE id=?").run(id),

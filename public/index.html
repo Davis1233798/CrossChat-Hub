@@ -1,16 +1,29 @@
 <!doctype html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CrossChat Hub — 管理中台</title>
-  <link rel="stylesheet" href="/style.css" />
-  <script type="module" src="/app.js"></script>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CrossChat Hub — 多帳號聊天桌面端</title>
+<link rel="stylesheet" href="/style.css" />
+<script type="module" src="/app.js"></script>
 </head>
 <body>
-  <header><div class="brand"><span class="logo">↔</span> CrossChat <strong>Hub</strong></div><span class="version">Desktop · v0.2</span></header>
-  <main>
-    <section class="hero"><p class="eyebrow">UNIFIED MESSAGING GATEWAY</p><h1>跨平台聊天整合中台</h1><p>統一接收訊息、建立使用者身分對應，並透過官方 Bot/API 傳送跨平台標記通知。</p></section>
+<header><div class="brand"><span class="logo">↔</span> CrossChat <strong>Hub</strong></div><span class="version">Account-first · Desktop v0.3</span></header>
+<main>
+<section class="hero"><p class="eyebrow">YOUR MESSENGERS, ONE DESKTOP</p><h1>登入你的聊天帳號</h1><p>直接使用各平台提供的官方登入方式，不需要輸入 Bot Token、Webhook Secret 或手動設定使用者 ID。部分平台僅支援身分登入，無法讀寫私人聊天室。</p></section>
+<section class="services" aria-label="帳號登入平台">
+  <article class="service service-telegram"><div class="service-brand">T</div><h2>Telegram</h2><span class="service-state neutral">個人登入尚未提供</span><p>Telegram 官方 MTProto 支援個人帳號登入，但此版本尚未完成安全的 TDLib 連線與工作階段管理。</p><button type="button" disabled title="尚未實作個人帳號連線">尚未支援</button></article>
+  <article class="service service-slack"><div class="service-brand">S</div><h2>Slack</h2><span class="service-state" id="account-state-slack">檢查設定</span><p>使用 Slack 官方 OAuth 連結自己的工作區帳號。聊天室存取範圍依授權與組織政策而定。</p><button type="button" data-login="slack">使用 Slack 登入</button></article>
+  <article class="service service-discord"><div class="service-brand">D</div><h2>Discord</h2><span class="service-state" id="account-state-discord">檢查設定</span><p>以 Discord OAuth 驗證自己的帳號。登入不代表能由第三方直接讀取或代發個人私訊。</p><button type="button" data-login="discord">使用 Discord 登入</button></article>
+  <article class="service service-line"><div class="service-brand">LINE</div><h2>LINE</h2><span class="service-state" id="account-state-line">檢查設定</span><p>開啟 LINE 官方登入頁面（平台可能提供 QR 驗證）。只能取得基本身分，不能同步個人 LINE 聊天。</p><button type="button" data-login="line">使用 LINE 登入</button></article>
+</section>
+<section class="panel personal-panel"><div class="section-head"><div><h2>已登入的帳號</h2><p>登入身分與訊息存取權限是兩件事，這裡不會把無法存取私人聊天的平台顯示為「聊天已連接」。</p></div><button class="secondary" id="personal-refresh">重新整理</button></div><div id="personal-accounts" class="account-list">尚未登入</div><p class="minor" id="personal-hint">桌面版會自動驗證本機服務；網頁版需在進階設定驗證管理員。</p></section>
+<section class="panel" id="slack-chat-panel" hidden><h2>Slack 工作區聊天</h2><p>此區使用你自己的 Slack OAuth 使用者權限，僅載入你有權限存取的聊天室。登入後手動點選「讀取聊天室」以取得列表。</p>
+<div class="chat-toolbar"><label>使用者帳號<select id="personal-slack-connection"></select></label><button type="button" id="personal-slack-rooms">讀取聊天室</button><label>選擇聊天室<select id="personal-slack-room"></select></label><button type="button" id="personal-slack-history">讀取訊息</button></div>
+<div id="personal-slack-messages" class="chat-messages">選擇聊天室後載入最近 50 筆訊息。</div>
+<form id="personal-slack-send" class="chat-compose"><label>訊息內容<input type="text" name="text" maxlength="3500" required placeholder="輸入訊息，送出到目前選擇的 Slack 聊天室" /></label><button type="submit">傳送</button></form>
+</section>
+<details class="advanced" id="advanced-panel"><summary>進階整合設定（提供給開發者／平台管理員）<small>Bot、Webhook、使用者對應、聊天室橋接</small></summary><div class="advanced-content"><p class="advance-warning">以下是管理員進階功能，並非一般使用者的登入流程。Bot/API 可存取的訊息也不等於個人帳號的全部聊天資料。</p>
     <section class="panel keypanel" id="key-panel"><h2>管理員驗證</h2><p>輸入由 <code>npm run setup</code> 產生的 <code>ADMIN_API_KEY</code>。金鑰僅保存在當前分頁記憶體。</p><div class="inline"><input id="key" type="password" autocomplete="off" placeholder="ADMIN_API_KEY (64 位 hex)" /><button id="connect">連線</button><span id="state" aria-live="polite">未連線</span></div></section>
     <div class="stats"><article><small>平台連線</small><b id="n-connections">—</b></article><article><small>身分對應</small><b id="n-identities">—</b></article><article><small>整合訊息</small><b id="n-messages">—</b></article><article><small>待發送 / 失敗</small><b id="n-pending">—</b></article></div>
     <div class="columns">
@@ -24,7 +37,7 @@
     </div>
 
     <div class="columns">
-      <section class="panel"><h2>3. Slack OAuth 工作區授權</h2><p>透過 Slack 官方安裝授權取得 Bot Token。每個工作區會建立一個新的加密平台連線；需事先在桌面設定檔／伺服器環境變數配置 Client ID、Client Secret 與 Signing Secret。</p>
+      <section class="panel"><h2>3. Slack OAuth 工作區授權</h2><p>進階 Bot 整合：透過 Slack 官方安裝授權取得 Bot Token。每個工作區會建立一個新的加密平台連線；需事先在桌面設定檔／伺服器環境變數配置 Client ID、Client Secret 與 Signing Secret。</p>
         <form id="slack-oauth-form"><label>連線顯示名稱<input name="name" required value="Slack 工作區" /></label><button type="submit" id="slack-oauth-button">以 Slack OAuth 連接</button><small id="slack-oauth-state" class="minor">檢查設定中</small></form>
       </section>
       <section class="panel"><h2>4. Discord OAuth 使用者驗證</h2><p>以 Discord 官方 OAuth 證明使用者 ID 與所選別名的對應。Bot 安裝仍須在 Discord Developer Portal 完成；OAuth 不會提供私人帳號聊天讀取權限。</p>
@@ -42,8 +55,8 @@
     <section class="panel"><h2>使用者對應</h2><div id="addresses" class="table-wrap">尚無資料</div></section>
     <section class="panel"><h2>統一訊息中心</h2><div id="messages" class="table-wrap">尚無資料</div></section>
     <section class="panel"><h2>通知轉送狀態</h2><div id="deliveries" class="table-wrap">尚無資料</div></section>
-    <p id="flash" role="status" aria-live="polite"></p>
-  </main>
-  <footer>CrossChat Hub · Official APIs only · Tokens encrypted at rest</footer>
-</body>
-</html>
+</div></details>
+<p id="flash" role="status" aria-live="polite"></p>
+</main>
+<footer>CrossChat Hub · Official authorizations only · Never request account passwords</footer>
+</body></html>
