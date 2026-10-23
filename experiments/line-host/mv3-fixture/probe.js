@@ -1,7 +1,11 @@
 const result = document.getElementById('result');
 async function inspect() {
   try {
-    result.textContent = JSON.stringify({ extensionId: chrome.runtime.id, ...await chrome.runtime.sendMessage({ type: 'capabilities' }) }, null, 2);
+    const report = await chrome.runtime.sendMessage({ type: 'capabilities' });
+    result.textContent = JSON.stringify({ extensionId: chrome.runtime.id, ...report }, null, 2);
+    if (Number.isInteger(report?.starts) && report.starts >= 1 && report.capabilities?.worker === true) {
+      console.info(JSON.stringify({ event: 'crosschat-fixture-ready', starts: report.starts, capabilities: report.capabilities }));
+    }
   } catch (error) { result.textContent = error.message; }
 }
 document.getElementById('refresh').onclick = inspect;

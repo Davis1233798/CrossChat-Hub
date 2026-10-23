@@ -54,7 +54,27 @@ does not. The loopback binding of this revised entrypoint is still unverified.
 Load only the parent directory's owned MV3 fixture with `--load-extension`.
 The fixed fixture start URL and registration/readiness limits below still apply.
 
-The browser always starts at our own synthetic fixture URL. Ordinary popup Views
+The browser starts at `about:blank`. Its internal CEF DevTools observer enables
+`Runtime` events and `Target` discovery, and checks the initial target snapshot.
+Only the exact owned fixture service-worker URL triggers navigation to the fixed
+probe URL. The probe emits a structured readiness console event only after its
+capabilities reply has `starts >= 1` and `worker === true`. The host accepts it
+only from a default execution context whose observed origin is the fixed fixture
+origin, while the main frame is at the exact probe URL; it also validates the
+capabilities boolean fields. No JavaScript is injected into LINE or other pages.
+Protocol dispatch/error, agent detach, or a 30-second deadline emits a structural
+`fixture-readiness` event with `ready:false`; elapsed time never means success.
+This mechanism uses CEF's internal DevTools API and needs no diagnostic listener.
+On browser close, the registration is released and the observer drops its browser
+reference; the queued deadline task then becomes a no-op. It retains no browser
+after readiness or failure either.
+
+2026-10-23: compiled and linked against the pinned CEF 144 headers. **Not run**:
+whether page-scoped `Target` discovery in this CEF version can enumerate extension
+workers remains unknown. A timeout is a failed readiness result, not proof that
+the extension cannot run. No login or same-window success is established here.
+
+Ordinary popup Views
 are added above the opener inside the same top-level Window using fill layout.
 The callback emits a structural sameViewsWindow diagnostic, without URL contents,
 credentials or message data. That callback alone is not acceptance evidence:
@@ -68,8 +88,8 @@ to close gracefully when the host window closes, including escaped worker
 windows. It preserves upstream OnBeforeClose bookkeeping and never force-kills
 the process. This guard compiled successfully; cancellation, re-entry and
 residual-process behavior still require live tests.
-Extension registration/readiness is still handled manually as described by the
-baseline README. Multi-view close lifecycle and popup restoration are unverified.
+Extension registration/readiness now uses the experimental event-driven mechanism
+above. Multi-view close lifecycle and popup restoration are unverified.
 The popup delegate now remembers each attachment's parent window and removes its
 overlay in `OnBrowserDestroyed`, before upstream lifespan bookkeeping runs. It
 then requests focus for the uppermost remaining live BrowserView. This avoids
