@@ -34,8 +34,8 @@ function fillSelect(id, items, label) {
   for (const item of items) { const opt = document.createElement('option'); opt.value = item.id; opt.textContent = label(item); el.append(opt); }
 }
 async function refresh() {
-  const [connections, identities, addresses, messages, deliveries, rules, accounts, gateway, oauthConfig] = await Promise.all(
-    ['connections','identities','addresses','messages','deliveries','bridge-rules','verified-accounts','gateway','oauth/config'].map(name => request(`/api/${name}`))
+  const [connections, identities, addresses, messages, deliveries, rules, accounts, gateway, oauthConfig, telegramConfig, demoState] = await Promise.all(
+    ['connections','identities','addresses','messages','deliveries','bridge-rules','verified-accounts','gateway','oauth/config','user/telegram/config','demo/state'].map(name => request(`/api/${name}`))
   );
   $('n-connections').textContent = connections.length;
   $('n-identities').textContent = identities.length;
@@ -67,6 +67,15 @@ async function refresh() {
   // Account-first sign-in surfaces only verifiable OAuth identities. LINE and
   // Discord identity grants are NOT presented as personal chat access.
   renderPersonalAccounts(accounts, connections);
+  $('telegram-state').textContent = telegramConfig.ready ? '可使用真實手機號碼登入' : '待設定應用程式 API';
+  $('telegram-state').classList.toggle('unavailable', !telegramConfig.ready);
+  $('telegram-open').disabled = !telegramConfig.ready;
+  $('demo-login').disabled = !demoState.available;
+  $('demo-login').textContent = demoState.active ? '繼續示範' : '開始示範';
+  if (demoState.active) await showDemoRooms();
+  const telegramConnections = connections.filter(c => c.platform === 'telegram' && accounts.some(a => a.provider === 'telegram' && a.connection_id === c.id));
+  $('telegram-chat-panel').hidden = telegramConnections.length === 0;
+  fillSelect('telegram-connection', telegramConnections, c => c.name);
   const users = connections.filter(c => c.platform === 'slack' && accounts.some(a => a.connection_id === c.id && a.provider === 'slack'));
   $('slack-chat-panel').hidden = users.length === 0;
   fillSelect('personal-slack-connection', users, c => c.name);
@@ -154,6 +163,68 @@ $('personal-slack-send').addEventListener('submit', async event => {
   } catch (error) { notify(error.message, true); }
 });
 $('personal-refresh').addEventListener('click', () => refresh().catch(e => notify(e.message,true)));
+let telegramLoginId = null;
+$('telegram-open').addEventListener('click', () => { $('telegram-login-panel').hidden = !$('telegram-login-panel').hidden; });
+$('telegram-phone-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  try {
+    const r = await request('/api/user/telegram/start', { method:'POST', body:JSON.stringify(formJson(e.target)) });
+    telegramLoginId = r.login_id;
+    $('telegram-code-form').hidden = false;
+    notify('已要求 Telegram 發出驗證碼；請查看你的 Telegram 應用程式或平台指定位置。');
+  } catch (err) { notify(err.message, true); }
+});
+$('telegram-code-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  try {
+    const r = await request('/api/user/telegram/complete', {method:'POST', body:JSON.stringify({login_id:telegramLoginId,...formJson(e.target)})});
+    if (r.stage === 'password_required') return notify('此帳號要求雙重驗證密碼，請填寫密碼後再次送出。');
+    telegramLoginId=null;
+    e.target.reset(); $('telegram-code-form').hidden=true; $('telegram-login-panel').hidden=true;
+    await refresh(); notify(`已登入 Telegram：${r.display_name}`);
+  } catch (err) { notify(err.message,true); }
+});
+$('telegram-rooms').addEventListener('click',async()=>{
+  try { const r=await request(`/api/user/telegram/rooms?connection_id=${encodeURIComponent($('telegram-connection').value)}`);
+    fillSelect('telegram-room',r.rooms,x=>x.name);notify(`已載入 ${r.rooms.length} 個 Telegram 聊天室`); }
+  catch(err){notify(err.message,true);}
+});
+function renderChat(nodeId,messages) {
+  const el=$(nodeId);el.replaceChildren();
+  for(const m of messages) {const item=document.createElement('article');item.className='chat-line';
+    const sender=document.createElement('small');sender.textContent=m.author??'';
+    const content=document.createElement('div');content.textContent=m.text??'';
+    item.append(sender,content);el.append(item);}
+  el.scrollTop=el.scrollHeight;
+}
+$('telegram-messages-refresh').addEventListener('click',async()=>{
+ try {const r=await request(`/api/user/telegram/messages?connection_id=${encodeURIComponent($('telegram-connection').value)}&room=${encodeURIComponent($('telegram-room').value)}`);renderChat('telegram-messages',r.messages);}catch(err){notify(err.message,true);}
+});
+$('telegram-send').addEventListener('submit',async e=>{
+ e.preventDefault();try {await request('/api/user/telegram/messages',{method:'POST',body:JSON.stringify({connection_id:$('telegram-connection').value,room:$('telegram-room').value,text:formJson(e.target).text})}); e.target.reset(); $('telegram-messages-refresh').click();notify('Telegram 訊息已發送');}catch(err){notify(err.message,true);}
+});
+async function showDemoRooms(){
+ const rooms=await request('/api/demo/rooms');
+ const last=$('demo-room').value;
+ fillSelect('demo-room',rooms,r=>r.name);
+ if (rooms.some(r=>r.id===last)) $('demo-room').value=last;
+ $('demo-panel').hidden=rooms.length===0;
+ if (rooms.length) await showDemoMessages();
+}
+async function showDemoMessages(){ renderChat('demo-messages',await request(`/api/demo/messages?room=${encodeURIComponent($('demo-room').value)}`)); }
+$('demo-login').addEventListener('click',async()=>{
+ try{await request('/api/demo/login',{method:'POST',body:'{}'});await showDemoRooms();notify('已登入本機示範帳號。這不是任何平台的真實帳號。');}catch(err){notify(err.message,true);}
+});
+$('demo-room').addEventListener('change',()=>showDemoMessages().catch(err=>notify(err.message,true)));
+$('demo-refresh').addEventListener('click',()=>showDemoMessages().catch(err=>notify(err.message,true)));
+$('demo-send').addEventListener('submit',async e=>{
+ e.preventDefault();try{await request('/api/demo/messages',{method:'POST',body:JSON.stringify({room:$('demo-room').value,text:formJson(e.target).text})});e.target.reset();await showDemoMessages();notify('本機示範訊息已送出。@platform:alice 會顯示在模擬收件聊天室，不會對外發送。');}catch(err){notify(err.message,true);}
+});
+if(window.crosschatDesktop){
+  const quit=document.createElement('button');quit.type='button';quit.className='secondary';quit.textContent='結束程式';
+  quit.addEventListener('click',()=>window.crosschatDesktop.quit());
+  document.querySelector('header').append(quit);
+}
 $('connect').addEventListener('click', async () => {
   apiKey = $('key').value.trim();
   $('key').value = '';

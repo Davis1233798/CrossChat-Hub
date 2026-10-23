@@ -3,14 +3,18 @@ import { createApp } from './app.mjs';
 import { createOAuthManager } from './oauth.mjs';
 import { DiscordGatewayManager } from './gateway.mjs';
 import { flushOutbox } from './bridge.mjs';
+import { createDemo } from './demo.mjs';
+import { createTelegramUser } from './telegram-user.mjs';
 
 export async function startHub({ env = process.env, host = '127.0.0.1', port = 8787, fetchFn = fetch, WebSocketClass = globalThis.WebSocket } = {}) {
   const store = createStore(env.DATABASE_PATH ?? './data/crosschat.sqlite', env.ENCRYPTION_KEY);
-  let app, gateway, interval;
+  let app, gateway, interval, telegramUser;
   try {
     const oauth = createOAuthManager({ store, env, fetchFn });
     gateway = new DiscordGatewayManager({ store, fetchFn, WebSocketClass });
-    app = createApp({ store, adminKey: env.ADMIN_API_KEY, oauth, gateway, fetchFn });
+    telegramUser = createTelegramUser({ store, env });
+    const demo = createDemo({ store, enabled: env.DEMO_MODE === 'true' });
+    app = createApp({ store, adminKey: env.ADMIN_API_KEY, oauth, gateway, demo, telegramUser, fetchFn });
     await new Promise((resolve, reject) => { app.once('error', reject); app.listen(port, host, resolve); });
     const actualPort = app.address().port;
     if (!env.OAUTH_CALLBACK_BASE_URL) env.OAUTH_CALLBACK_BASE_URL = `http://${host}:${actualPort}`;
@@ -31,12 +35,17 @@ export async function startHub({ env = process.env, host = '127.0.0.1', port = 8
         closed = true;
         clearInterval(interval);
         gateway.stop();
-        await new Promise((resolve, reject) => app.close(err => err ? reject(err) : resolve()));
+        await telegramUser?.close();
+        // HTTP keep-alive or WebSocket upgrades must not indefinitely block shutdown.
+        if (app.listening) await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => app.closeAllConnections?.(), 750);
+          app.close(err => { clearTimeout(timer); err ? reject(err) : resolve(); });
+        });
         store.close();
       },
     };
   } catch (error) {
-    clearInterval(interval); gateway?.stop();
+    clearInterval(interval); gateway?.stop(); await telegramUser?.close();
     if (app?.listening) await new Promise(resolve => app.close(resolve));
     store.close();
     throw error;

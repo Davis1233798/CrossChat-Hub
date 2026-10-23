@@ -65,7 +65,7 @@ function cleanCredentials(platform, obj) {
   };
 }
 
-export function createApp({ store, adminKey, oauth = null, gateway = null, fetchFn = fetch }) {
+export function createApp({ store, adminKey, oauth = null, gateway = null, demo = null, telegramUser = null, fetchFn = fetch }) {
   if (!/^[a-f0-9]{64}$/i.test(adminKey ?? '')) throw new Error('ADMIN_API_KEY must be a 32-byte hex string');
   const handle = async (req, res) => {
     Object.entries(securityHeaders).forEach(([k, v]) => res.setHeader(k, v));
@@ -117,6 +117,36 @@ export function createApp({ store, adminKey, oauth = null, gateway = null, fetch
       }
       if (!path.startsWith('/api/')) throw problem(404, 'Not found');
       if (!equal(req.headers.authorization, `Bearer ${adminKey}`)) throw problem(401, 'Invalid admin credential');
+      if (path === '/api/demo/state' && method === 'GET') return respond(200, { available: demo?.enabled ?? false, active: demo?.enabled && store.demoEnabled() || false });
+      if (path === '/api/demo/login' && method === 'POST') {
+        if (!demo) throw problem(404, 'Demo disabled');
+        return respond(200, demo.login());
+      }
+      if (path === '/api/demo/rooms' && method === 'GET') return respond(200, demo?.rooms() ?? []);
+      if (path === '/api/demo/messages' && method === 'GET') return respond(200, demo?.messages(requestURL.searchParams.get('room')) ?? []);
+      if (path === '/api/demo/messages' && method === 'POST') {
+        if (!demo) throw problem(404, 'Demo disabled');
+        const input = decodeJson(await readBody(req));
+        return respond(201, demo.send(input.room, input.text));
+      }
+      if (path === '/api/user/telegram/config' && method === 'GET') return respond(200, { ready: telegramUser?.configured() ?? false });
+      if (path === '/api/user/telegram/start' && method === 'POST') {
+        if (!telegramUser) throw problem(503, 'Telegram unavailable');
+        const input = decodeJson(await readBody(req));
+        return respond(200, await telegramUser.begin(input.phone));
+      }
+      if (path === '/api/user/telegram/complete' && method === 'POST') {
+        if (!telegramUser) throw problem(503, 'Telegram unavailable');
+        const input = decodeJson(await readBody(req));
+        return respond(200, await telegramUser.complete(input.login_id,input.code,input.password));
+      }
+      if (path === '/api/user/telegram/rooms' && method === 'GET') return respond(200, { rooms: await telegramUser.withSession(requestURL.searchParams.get('connection_id'), 'rooms') });
+      if (path === '/api/user/telegram/messages' && method === 'GET') return respond(200, { messages: await telegramUser.withSession(requestURL.searchParams.get('connection_id'), 'messages', requestURL.searchParams.get('room')) });
+      if (path === '/api/user/telegram/messages' && method === 'POST') {
+        const input = decodeJson(await readBody(req));
+        if (!validText(input.text,3500)) throw problem(400,'Invalid text');
+        return respond(200, { message: await telegramUser.withSession(input.connection_id, 'send', input.room, input.text) });
+      }
       const slackAccount = path === '/api/user/slack/rooms' || path === '/api/user/slack/messages';
       if (slackAccount) {
         const payload = method === 'POST' ? decodeJson(await readBody(req)) : Object.fromEntries(requestURL.searchParams);

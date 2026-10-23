@@ -43,6 +43,8 @@ export function createStore(path, encryptionKey) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(source_connection_id,source_room_id,target_connection_id,target_room_id)
     );
+    CREATE TABLE IF NOT EXISTS demo_settings (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS demo_messages (id TEXT PRIMARY KEY, room_id TEXT NOT NULL, author TEXT NOT NULL, text TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS verified_accounts (
       id TEXT PRIMARY KEY, provider TEXT NOT NULL, external_user_id TEXT NOT NULL,
       display_name TEXT NOT NULL, identity_id TEXT REFERENCES identities(id),
@@ -61,6 +63,21 @@ export function createStore(path, encryptionKey) {
   const publicConnection = v => v && ({ id: v.id, platform: v.platform, name: v.name, created_at: v.created_at, webhook_path: `/webhooks/${v.platform}/${v.id}` });
   return {
     close: () => db.close(),
+    seedDemo(rooms) {
+      q('INSERT OR IGNORE INTO demo_settings(id,enabled) VALUES(1,1)').run();
+      q('UPDATE demo_settings SET enabled=1 WHERE id=1').run();
+      if (!q('SELECT id FROM demo_messages LIMIT 1').get()) {
+        for (const room of rooms) q('INSERT INTO demo_messages(id,room_id,author,text) VALUES(?,?,?,?)')
+          .run(randomUUID(),room.id,'系統（純本機模擬）', `歡迎來到 ${room.name}。請在下方傳送訊息，或輸入 @line:alice 測試跨平台模擬通知。`);
+      }
+    },
+    demoEnabled: () => Boolean(q('SELECT enabled FROM demo_settings WHERE id=1').get()?.enabled),
+    listDemoMessages: room => q('SELECT * FROM demo_messages WHERE room_id=? ORDER BY rowid LIMIT 100').all(room),
+    addDemoMessage(room, author, text) {
+      const id = randomUUID();
+      q('INSERT INTO demo_messages(id,room_id,author,text) VALUES(?,?,?,?)').run(id,room,author,text);
+      return q('SELECT * FROM demo_messages WHERE id=?').get(id);
+    },
     listConnections: () => q('SELECT id,platform,name,created_at FROM connections ORDER BY created_at DESC').all().map(publicConnection),
     getConnection: id => {
       const r = q('SELECT * FROM connections WHERE id=?').get(id);

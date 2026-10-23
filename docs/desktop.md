@@ -170,3 +170,17 @@ with the exact matching provider application.
 
 Do not ask users for their LINE, Discord, Telegram or Slack passwords within
 CrossChat Hub. Use official authorization screens.
+
+## v0.3.1: Desktop close / installer file locked on Windows
+
+Old builds could block during `app.before-quit` awaiting `http.Server.close` with no deadline. The new desktop client has an explicit "結束程式" button and waits up to 2.5 seconds for HTTP/Discord resources, then calls Electron `app.exit(0)`. The runtime also forces idle HTTP connections closed after a short grace period. This prevents the new version retaining the executable after close, but cannot retroactively kill a stale v0.3.0 process.
+
+Before installing over v0.3.0, quit the app. If `CrossChat Hub.exe` remains active, from the cloned repo run `scripts/repair-windows.ps1` to stop only the process installed in your **own** `%LOCALAPPDATA%\Programs\CrossChat Hub` directory. This script preserves encrypted data files and does not require admin by default. Do not mix MSI and NSIS EXE as interchangeable in-place upgraders: uninstall the older distribution first if needed. The MSI remains per-user (`perMachine:false`). Unsigned preview installers may still trigger Windows Defender SmartScreen or enterprise restrictions.
+
+## v0.3.1: Telegram user MTProto and local demo
+
+The desktop always offers local demonstration mode. It is completely offline, with three seeded mock rooms and an example `@line:alice` simulated delivery. It does not connect to LINE/Telegram/Slack.
+
+For a **real** Telegram personal account the app maintainer must register an API app at https://my.telegram.org and set `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` in the desktop `settings.json` (Electron `userData` directory, typically `%APPDATA%\crosschat-hub` on Windows) **before restarting CrossChat Hub**. This is app setup, not a user Bot Token. Then the first-party UI asks only for a phone number, app/SMS code, and the Telegram two-step password if enabled. The client uses teleproto MTProto; authenticated session is stored encrypted by the existing local store. The client is not secretly using a self-bot on Discord or the LINE personal protocol.
+
+The integration tests use a mocked Telegram transport and cannot confirm delivery of a real verification code or network interoperability. Provider-requested email and reCAPTCHA flows are not implemented, so some Telegram users may still be blocked.

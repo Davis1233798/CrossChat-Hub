@@ -8,15 +8,18 @@
 <script type="module" src="/app.js"></script>
 </head>
 <body>
-<header><div class="brand"><span class="logo">↔</span> CrossChat <strong>Hub</strong></div><span class="version">Account-first · Desktop v0.3</span></header>
+<header><div class="brand"><span class="logo">↔</span> CrossChat <strong>Hub</strong></div><span class="version">Account-first · Desktop v0.3.1</span></header>
 <main>
 <section class="hero"><p class="eyebrow">YOUR MESSENGERS, ONE DESKTOP</p><h1>登入你的聊天帳號</h1><p>直接使用各平台提供的官方登入方式，不需要輸入 Bot Token、Webhook Secret 或手動設定使用者 ID。部分平台僅支援身分登入，無法讀寫私人聊天室。</p></section>
 <section class="services" aria-label="帳號登入平台">
-  <article class="service service-telegram"><div class="service-brand">T</div><h2>Telegram</h2><span class="service-state neutral">個人登入尚未提供</span><p>Telegram 官方 MTProto 支援個人帳號登入，但此版本尚未完成安全的 TDLib 連線與工作階段管理。</p><button type="button" disabled title="尚未實作個人帳號連線">尚未支援</button></article>
+  <article class="service service-telegram"><div class="service-brand">T</div><h2>Telegram</h2><span class="service-state" id="telegram-state">檢查設定</span><p>真正的個人帳號登入：手機號碼、驗證碼、雙重驗證。開發者須先配置一次官方 API ID／Hash。</p><button type="button" id="telegram-open">登入 Telegram</button></article>
   <article class="service service-slack"><div class="service-brand">S</div><h2>Slack</h2><span class="service-state" id="account-state-slack">檢查設定</span><p>使用 Slack 官方 OAuth 連結自己的工作區帳號。聊天室存取範圍依授權與組織政策而定。</p><button type="button" data-login="slack">使用 Slack 登入</button></article>
   <article class="service service-discord"><div class="service-brand">D</div><h2>Discord</h2><span class="service-state" id="account-state-discord">檢查設定</span><p>以 Discord OAuth 驗證自己的帳號。登入不代表能由第三方直接讀取或代發個人私訊。</p><button type="button" data-login="discord">使用 Discord 登入</button></article>
   <article class="service service-line"><div class="service-brand">LINE</div><h2>LINE</h2><span class="service-state" id="account-state-line">檢查設定</span><p>開啟 LINE 官方登入頁面（平台可能提供 QR 驗證）。只能取得基本身分，不能同步個人 LINE 聊天。</p><button type="button" data-login="line">使用 LINE 登入</button></article>
 </section>
+<section class="panel demo-onboard"><div class="section-head"><div><h2>立即試用：本機示範帳號</h2><p>不需要 Bot Token、OAuth 或真實帳號；可以查看三個模擬聊天室、發送訊息，並測試 @line:alice 的跨平台模擬轉送。<strong>不會傳送到任何真正的平台。</strong></p></div><button type="button" id="demo-login">開始示範</button></div><section id="demo-panel" hidden><div class="chat-toolbar"><label>示範聊天室<select id="demo-room"></select></label><button type="button" id="demo-refresh" class="secondary">重新整理</button></div><div id="demo-messages" class="chat-messages"></div><form id="demo-send" class="chat-compose"><label>本機測試訊息<input name="text" maxlength="3500" required placeholder="例如：@line:alice 請幫我確認" /></label><button type="submit">傳送示範訊息</button></form></section></section>
+<section class="panel" id="telegram-login-panel" hidden><h2>Telegram 個人帳號登入</h2><p>輸入國碼與手機號碼，Telegram 可能將驗證碼送到現有 Telegram 裝置。API ID／Hash 必須由應用程式維護者先設定，不會放在 GitHub 原始碼。</p><form id="telegram-phone-form"><label>手機號碼（國際格式）<input name="phone" type="tel" placeholder="+886912345678" required /></label><button type="submit">取得 Telegram 驗證碼</button></form><form id="telegram-code-form" hidden><label>Telegram 驗證碼<input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="輸入 Telegram 發出的驗證碼" /></label><label>雙重驗證密碼（僅在需要時填寫）<input name="password" type="password" autocomplete="off" /></label><button type="submit">完成登入</button></form><p class="minor">若應用程式尚未配置 Telegram API，請由程式維護者參考 README 設定。此流程不使用 Telegram Bot Token。</p></section>
+<section class="panel" id="telegram-chat-panel" hidden><h2>Telegram 個人聊天室</h2><div class="chat-toolbar"><label>已登入帳號<select id="telegram-connection"></select></label><button id="telegram-rooms" type="button">讀取聊天室</button><label>聊天室<select id="telegram-room"></select></label><button id="telegram-messages-refresh" type="button">讀取訊息</button></div><div id="telegram-messages" class="chat-messages"></div><form id="telegram-send" class="chat-compose"><label>發送到選定 Telegram 聊天室<input name="text" required maxlength="3500" /></label><button type="submit">發送</button></form></section>
 <section class="panel personal-panel"><div class="section-head"><div><h2>已登入的帳號</h2><p>登入身分與訊息存取權限是兩件事，這裡不會把無法存取私人聊天的平台顯示為「聊天已連接」。</p></div><button class="secondary" id="personal-refresh">重新整理</button></div><div id="personal-accounts" class="account-list">尚未登入</div><p class="minor" id="personal-hint">桌面版會自動驗證本機服務；網頁版需在進階設定驗證管理員。</p></section>
 <section class="panel" id="slack-chat-panel" hidden><h2>Slack 工作區聊天</h2><p>此區使用你自己的 Slack OAuth 使用者權限，僅載入你有權限存取的聊天室。登入後手動點選「讀取聊天室」以取得列表。</p>
 <div class="chat-toolbar"><label>使用者帳號<select id="personal-slack-connection"></select></label><button type="button" id="personal-slack-rooms">讀取聊天室</button><label>選擇聊天室<select id="personal-slack-room"></select></label><button type="button" id="personal-slack-history">讀取訊息</button></div>
@@ -58,5 +61,5 @@
 </div></details>
 <p id="flash" role="status" aria-live="polite"></p>
 </main>
-<footer>CrossChat Hub · Official authorizations only · Never request account passwords</footer>
+<footer>CrossChat Hub · 真實平台透過官方授權；示範訊息永不連接外部服務</footer>
 </body></html>

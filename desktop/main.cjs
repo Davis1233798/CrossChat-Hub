@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const { randomBytes } = require('node:crypto');
 const { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } = require('node:fs');
 const path = require('node:path');
+const { closeWithDeadline } = require('../src/shutdown.cjs');
 
 const hasLock = app.requestSingleInstanceLock();
 if (!hasLock) app.quit();
@@ -66,10 +67,14 @@ if (hasLock) {
     try {
       secrets = loadDesktopSettings();
       const { startHub } = await import('../src/runtime.mjs');
-      hub = await startHub({ env: secrets, host: '127.0.0.1', port: 8787 });
+      hub = await startHub({ env: { ...secrets, DEMO_MODE: 'true' }, host: '127.0.0.1', port: 8787 });
       ipcMain.handle('crosschat:admin-key', (event) => {
         if (!window || event.sender !== window.webContents) throw new Error('Untrusted renderer');
         return secrets.ADMIN_API_KEY;
+      });
+      ipcMain.handle('crosschat:quit', (event) => {
+        if (!window || event.sender !== window.webContents) throw new Error('Untrusted renderer');
+        app.quit();
       });
       await createWindow();
     } catch (error) {
@@ -82,12 +87,13 @@ if (hasLock) {
   });
   let quitting = false;
   app.on('before-quit', event => {
-    if (!hub || quitting) return;
-    event.preventDefault();
+    if (quitting) return;
     quitting = true;
+    event.preventDefault();
     const active = hub;
     hub = null;
-    active.close().catch(console.error).finally(() => app.quit());
+    void closeWithDeadline(() => active?.close(), 2500)
+      .finally(() => app.exit(0)); // no permanent EXE lock when HTTP/WebSocket stalls
   });
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 }
