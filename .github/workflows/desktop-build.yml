@@ -19,6 +19,8 @@ jobs:
           node-version: '24'
       - run: npm run check
       - run: npm test
+      - name: Synthetic LINE host regressions (mock only; no CEF or account)
+        run: node --test experiments/line-host/tests/*.test.mjs
 
   package:
     name: ${{ matrix.label }}
