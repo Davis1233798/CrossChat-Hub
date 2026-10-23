@@ -56,6 +56,14 @@ Production must handle extension readiness explicitly rather than rely on a dela
 owned local debugging endpoint, then requests a service-worker popup and records
 window IDs. It must never be used with a real account profile or messenger page.
 
+The inspector now defaults to exercising both popup paths. Pass `ordinary` or
+`worker` to isolate one path, using a fresh fixture session for each run. It waits
+for the actual child target, compares main and child CDP window IDs (not IDs from
+different APIs), and exits unsuccessfully if either child escapes the main
+window. Existing child targets are rejected to avoid stale results. This revised
+inspector has passed syntax validation only; its two-path runtime result remains
+pending. Earlier window observations below came from the original inspector.
+
 Observed fixture capabilities: worker initialized, local storage persisted its
 start counter, and windows.create/onRemoved, downloads, notifications, cookies
 and system.display methods were present. `chrome.windows.create` really returned
