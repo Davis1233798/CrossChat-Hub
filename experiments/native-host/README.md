@@ -67,3 +67,34 @@ until crash recovery is implemented and reviewed; a killed/crashed host can
 leave a third-party window in an undesirable state. A shipping version also
 needs a clear manual detach control. Actual mentions/forwarding require a
 separate messaging adapter and delivery evidence; parenting grants no API.
+
+## Hard-crash study: post-exit guardian cannot guarantee recovery
+
+`CrashStudy.exe --output <absolute-json-path>` is an independent controller plus
+two owned synthetic fixture processes. It has **no external-application attach
+interface**. It captures the child's original state, embeds it in the owned
+host, intentionally hard-terminates only that host, checks the original child
+HWND/PID, and attempts restoration only if that HWND still exists. Fixture
+cleanup is reported separately from restoration; an orphaned fixture process
+may require forced cleanup, which is never counted as normal closure.
+
+Actual Windows run on 2026-10-23 produced `embedded=true`,
+`syntheticHostHardExit=true`, **`childWindowSurvived=false`** and
+**`guardianRestoreVerified=false`**, exit 1. The child process initially remained
+without its original HWND and was cleaned up using its verified owned fixture
+path/command line. No LINE or Chrome was used in this crash experiment.
+
+This is a negative reliability result, not a passing recovery test. Merely
+waiting for host death and then calling SetParent is insufficient here: once
+Windows has destroyed the original child HWND, no guardian can restore it.
+Microsoft's [DestroyWindow documentation](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-destroywindow)
+states that parent destruction also destroys child windows, while direct
+DestroyWindow calls cannot target another thread's windows. The actual crash
+study resolves why the latter sentence must not be assumed to protect this
+cross-process parenting arrangement.
+
+A different design would keep the real parent HWND in a persistent broker
+process and let the Hub control that broker, so a Hub crash does not destroy
+the real parent. This still needs proof for nested ownership and broker failure;
+it is a design proposal, **not implemented recovery**. Existing-app crash or
+attachment retries remain out of scope until such recovery is established.

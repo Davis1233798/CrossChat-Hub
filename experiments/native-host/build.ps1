@@ -7,4 +7,8 @@ $sourceFile = Join-Path $PSScriptRoot 'NativeHost.cs'
 $executable = Join-Path $outputDir 'NativeHost.exe'
 & $compiler /nologo /target:exe /platform:x64 /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/out:$executable" $sourceFile
 if ($LASTEXITCODE -ne 0) { throw 'Native host compilation failed' }
+$crashSource = Join-Path $PSScriptRoot 'CrashStudy.cs'
+$crashExecutable = Join-Path $outputDir 'CrashStudy.exe'
+& $compiler /nologo /target:exe /platform:x64 /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/out:$crashExecutable" $crashSource
+if ($LASTEXITCODE -ne 0) { throw 'Crash study compilation failed' }
 Write-Output (Join-Path $outputDir 'NativeHost.exe')
