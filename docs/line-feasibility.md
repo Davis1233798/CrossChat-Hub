@@ -88,6 +88,39 @@ out all possible extension hosts.
 
 ## Next implementation experiment and acceptance gates
 
+### Follow-up: original LINE in compiled CEF (Windows, pre-login only)
+
+After the synthetic fixture baseline, a fresh CEF 144 Chrome-style Views profile
+loaded the unmodified original unpacked LINE 3.7.2 package. The main window was
+initially `about:blank`; the registered extension service worker was observed
+before navigating that existing page to the extension's original `index.html`.
+No action button, credential, QR scan or login submission was automated.
+
+Observed evidence:
+
+- The background service worker remained listed.
+- Main native window ID stayed `1677589399` before/after navigation; only one page
+  target was present. Thus this direct-navigation experiment did not create a
+  second top-level page window.
+- Document title was LINE and the React root had one child, but visible body text,
+  inputs, buttons and images were absent. The official login UI was not verified.
+- Runtime exception was `Hp: ltsm_not_available`, observed again on reload.
+- The original package's `ltsmSandbox.html` iframe target was observed. Resource
+  diagnostics showed telemetry-host DNS failures, but no evidence establishes
+  those failures as the cause of the LTSM initialization error.
+- Unpacked extension ID was `mckobiklbnifjbjheekckfflkmeeacpd`, not the publisher's
+  official ID. Whether this affects initialization is a hypothesis, not a proven
+  diagnosis. Original signed-package identity/install support is the next gate.
+
+No original extension source, wasm, manifest, authentication or encryption logic
+was patched. No private Chrome/LINE profile was used. No QR image, credential or
+message content was captured. CEF's diagnostic listener was local to the temporary
+test host; production must never expose account debugging this way.
+
+This advances the route from API presence to an actual original-client startup
+failure. It does not establish LINE login/chat support, and it does not prove
+that other correctly installed/signed CEF or Chrome host configurations fail.
+
 Use a separate experimental CEF Views/Chrome-style shell, keeping current
 Electron code intact until feasibility is established:
 
