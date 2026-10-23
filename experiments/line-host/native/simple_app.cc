@@ -7,6 +7,7 @@
 #include <limits>
 #include <vector>
 #include <set>
+#include <map>
 #include "include/cef_devtools_message_observer.h"
 #include "include/cef_parser.h"
 #include "include/cef_task.h"
@@ -30,7 +31,9 @@ class FixtureReadiness : public CefDevToolsMessageObserver, public CefTask {
     params->SetBool("discover", true);
     if (!Call(1, "Runtime.enable", nullptr) ||
         !Call(2, "Target.setDiscoverTargets", params) ||
-        !Call(3, "Target.getTargets", nullptr)) Fail("dispatch-failed");
+        !Call(3, "Target.getTargets", nullptr) ||
+        !Call(4, "Page.getFrameTree", nullptr) ||
+        !Call(5, "Target.getTargetInfo", nullptr)) Fail("dispatch-failed");
     if (!CefPostDelayedTask(TID_UI, this, 30000)) Fail("timer-failed");
   }
   void Stop() { browser_ = nullptr; done_ = true; contexts_.clear(); }
@@ -38,9 +41,29 @@ class FixtureReadiness : public CefDevToolsMessageObserver, public CefTask {
   void OnDevToolsMethodResult(CefRefPtr<CefBrowser>, int id, bool success,
                              const void* result, size_t size) override {
     if (done_) return;
+    // Other users of this browser's DevTools agent may issue unrelated calls.
+    if (id < 1 || id > 5) return;
     if (!success) { Fail("protocol-method-failed"); return; }
-    if (id != 3) return;
+    if (id < 3) return;
     auto dict = Parse(result, size);
+    if (id == 4) {
+      auto tree = dict ? dict->GetDictionary("frameTree") : nullptr;
+      auto frame = tree ? tree->GetDictionary("frame") : nullptr;
+      if (!frame || frame->GetString("id").empty()) {
+        Fail("main-frame-unavailable"); return;
+      }
+      main_frame_id_ = frame->GetString("id");
+      return;
+    }
+    if (id == 5) {
+      auto target = dict ? dict->GetDictionary("targetInfo") : nullptr;
+      if (!target || target->GetString("browserContextId").empty()) {
+        Fail("browser-context-unavailable"); return;
+      }
+      browser_context_id_ = target->GetString("browserContextId");
+      MaybeNavigate();
+      return;
+    }
     auto targets = dict ? dict->GetList("targetInfos") : nullptr;
     if (targets) for (size_t i = 0; i < targets->GetSize(); ++i)
       CheckWorker(targets->GetDictionary(i));
@@ -61,9 +84,11 @@ class FixtureReadiness : public CefDevToolsMessageObserver, public CefTask {
       auto aux = context ? context->GetDictionary("auxData") : nullptr;
       if (context && aux && aux->GetBool("isDefault") &&
           context->GetString("origin") == kOrigin)
-        contexts_.insert(context->GetInt("id"));
+        contexts_[context->GetInt("id")] = aux->GetString("frameId");
     } else if (method == "Runtime.consoleAPICalled" && navigated_ &&
+               !main_frame_id_.empty() &&
                contexts_.count(dict->GetInt("executionContextId")) &&
+               contexts_.at(dict->GetInt("executionContextId")) == main_frame_id_ &&
                browser_ && browser_->GetMainFrame()->GetURL() == kProbe) {
       auto args = dict->GetList("args");
       auto first = args && args->GetSize() == 1 ? args->GetDictionary(0) : nullptr;
@@ -72,7 +97,8 @@ class FixtureReadiness : public CefDevToolsMessageObserver, public CefTask {
       auto data = Parse(value.data(), value.size());
       if (!data || data->GetString("event") != "crosschat-fixture-ready") return;
       auto caps = data->GetDictionary("capabilities");
-      if (data->GetInt("starts") < 1 || !caps || !caps->GetBool("worker")) {
+      if (data->GetType("starts") != VTYPE_INT || data->GetInt("starts") < 1 ||
+          !caps || !caps->GetBool("worker")) {
         Fail("invalid-handshake"); return;
       }
       for (const char* key : {"worker", "windowsCreate", "windowsRemoved", "downloads",
@@ -98,8 +124,17 @@ class FixtureReadiness : public CefDevToolsMessageObserver, public CefTask {
   }
   void CheckWorker(CefRefPtr<CefDictionaryValue> target) {
     if (!done_ && !navigated_ && target &&
-        target->GetString("type") == "service_worker" && target->GetString("url") == kWorker) {
+        target->GetString("type") == "service_worker" && target->GetString("url") == kWorker &&
+        !target->GetString("browserContextId").empty()) {
+      worker_contexts_.insert(target->GetString("browserContextId"));
+      MaybeNavigate();
+    }
+  }
+  void MaybeNavigate() {
+    if (!done_ && !navigated_ && !browser_context_id_.empty() &&
+        worker_contexts_.count(browser_context_id_)) {
       navigated_ = true;
+      contexts_.clear();
       browser_->GetMainFrame()->LoadURL(kProbe);
     }
   }
@@ -111,7 +146,10 @@ class FixtureReadiness : public CefDevToolsMessageObserver, public CefTask {
     browser_ = nullptr;
   }
   CefRefPtr<CefBrowser> browser_;
-  std::set<int> contexts_;
+  std::map<int, std::string> contexts_;
+  std::set<std::string> worker_contexts_;
+  std::string browser_context_id_;
+  std::string main_frame_id_;
   bool done_ = false;
   bool navigated_ = false;
   IMPLEMENT_REFCOUNTING(FixtureReadiness);
