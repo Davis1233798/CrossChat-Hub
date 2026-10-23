@@ -11,10 +11,13 @@ async function report() {
   const previous = (await chrome.storage.local.get('starts')).starts || 0;
   await chrome.storage.local.set({ starts: previous + 1, capabilities: capabilities() });
 }
-void report();
+const initialized = report();
+// Keep startup failures observable without an unhandled rejection.
+void initialized.catch(() => {});
 chrome.runtime.onMessage.addListener((message, _sender, reply) => {
   if (message?.type === 'capabilities') {
-    chrome.storage.local.get(['starts', 'capabilities']).then(reply);
+    initialized.then(() => chrome.storage.local.get(['starts', 'capabilities']))
+      .then(reply, error => reply({ error: error.message }));
     return true;
   }
   if (message?.type === 'worker-window') {
