@@ -1,5 +1,7 @@
 # CrossChat Hub — Codex 開發交接與施工規格（consruction.md）
 
+> **LINE 優先決策（使用者最新要求）：** LINE 個人聊天同窗內嵌是最重要且不可省略的核心；其他平台不能替代交付。已委派三路調查並以原版 LINE Chrome 3.7.2 做隔離 Electron 45 初始化診斷，觀察到未定義 API 錯誤。官方 Chrome 版仍在提供；不能以無一般網頁版推論無解。下一個優先原型為 CEF Chrome-style Views 全外殼，尚未完成實測。詳見 `docs/line-feasibility.md`；不綑綁官方套件、不宣稱已登入或可傳訊。
+
 > **2026-10-23 接手開發補充：** 使用者已確認第五個服務沿用 WhatsApp。已在 `codex/messenger-development` 補強導航／redirect／遞迴彈窗限制、快捷鍵頁籤狀態同步、Electron 真實視窗 smoke、依賴鎖定及現行架構文件。本機 35 項測試、Windows MSI/NSIS/ZIP 打包與打包後視窗啟動／正常退出通過；未驗證安裝升級或真人聊天。完整分項證據見 `docs/acceptance.md`。下文原始交接現況保留作歷史基準，LINE 與真人 E2E 仍是正式發行阻礙。
 
 > **同日 CI 補充（程式碼 `7492fe8`）：** 舊 NSIS 路徑重現 `0xC0000005` 後，改成正常關閉視窗與 ExecWait 程序檢查，取消強制終止。新 [CI 39949726403](https://github.com/JackChen6203/CrossChat-Hub/actions/runs/39949726403) 已通過 Windows 乾淨安裝、執行中同版本重新安裝、重啟、執行中解除安裝與程序／檔案移除，以及 Windows/macOS Intel/ARM 的真實視窗 smoke、三平台打包；Mac 仍僅有 DMG 掛載檢查，沒有安裝／更新驗收。舊版升級、MSI 安裝／遷移與真人聊天仍未驗證。成果為 [草稿 PR #1](https://github.com/Davis1233798/CrossChat-Hub/pull/1)，沒有發布 Release。
