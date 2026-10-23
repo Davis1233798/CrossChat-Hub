@@ -12,7 +12,10 @@ This is a development checkpoint, not approval for a production release.
 | `npm test` | 35 passed | Backend mock/local checks; navigation policy, redirects and nested popup behavior with fake WebContents |
 | `npm run test:desktop` | Pass on Windows 11 / Node 24.0.2 / Electron 45 | Real visible window, Ctrl+5 / Ctrl+1 shell selection, honest LINE panel, remote view Node disabled, normal window close with process exit code 0 |
 | Windows x64 build | MSI / NSIS EXE / ZIP produced | Build only; unsigned. Unpacked packaged EXE created a visible native window and exited normally with code 0 |
-| CI changes | Remote verification pending | Node 24, lockfile install, native-window smoke on Windows/macOS packaging runners; packaging includes `codex/**` branches |
+| Remote syntax/unit CI | Pass, code commit `7492fe8` | [Run 39949726550](https://github.com/JackChen6203/CrossChat-Hub/actions/runs/39949726550) |
+| Remote desktop matrix | All jobs passed, code commit `7492fe8` | [Run 39949726403](https://github.com/JackChen6203/CrossChat-Hub/actions/runs/39949726403): native window smoke on Windows/macOS x64/arm64, three packaging artifacts; release skipped |
+| Remote Windows NSIS lifecycle | Pass on hosted Windows runner | Clean install, visible window, normal exit, reinstall same version while running, relaunch, uninstall while running, executable/process removal |
+| Remote macOS x64/arm64 | Build, source-window smoke and DMG mount checks passed | Not proof of packaged installation/upgrade or real provider login |
 
 The native-window harness uses a newly created OS temporary profile and does not
 touch existing messenger sessions. It inspects the local shell only. No account
@@ -67,9 +70,7 @@ images, passwords, session files, real message text or tokens in evidence.
 - Windows installation/upgrade/uninstall and macOS x64/arm64 installation,
   launch/close/relaunch/update must have separate evidence.
 
-## Remaining product blockers
-
-## Installer regression under investigation
+## Installer regression and verified fix
 
 Remote run `39948891586` passed all three native-window smokes and both macOS
 packaging/mount jobs, but Windows NSIS installation returned `0xC0000005` before
@@ -79,7 +80,10 @@ request plus ExecWait-based system task listing. Any remaining process or failed
 check blocks modification with exit code 2; no force termination occurs.
 The NSIS installer compiles locally. The new CI lifecycle script requires a clean
 runner and checks install, normal close, same-version reinstall while running,
-relaunch, and uninstall while running. Verification of that fix is pending.
+relaunch, and uninstall while running. All checks passed in run `39949726403` at
+code commit `7492fe8`, including exit code 0 when the installer/uninstaller closed
+the application. The installed executable and processes were removed afterward.
+Windows x64, macOS x64 and macOS arm64 artifacts were confirmed present on that run.
 Same-version reinstall must not be described as an upgrade from v0.3.1.
 
 ## Remaining product blockers (release gates)

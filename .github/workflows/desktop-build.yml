@@ -150,4 +150,3 @@ jobs:
             --title "CrossChat Hub $tag (unsigned preview)" \
             --notes 'Unsigned preview builds. Windows MSI/EXE x64; macOS Intel x64 and Apple Silicon arm64 DMG/ZIP. Windows SmartScreen or macOS Gatekeeper may block installation. These binaries are for testing, not notarized production deployment.' \
             --prerelease
-
