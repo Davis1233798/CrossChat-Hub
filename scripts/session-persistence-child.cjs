@@ -22,7 +22,7 @@ async function loadFixture(contents) {
   // Startup/recreated views may already be navigating to this same fixture.
   // Wait for that navigation rather than aborting it with a second loadURL.
   if (contents.isLoading()) await new Promise(resolve => contents.once('did-stop-loading', resolve));
-  if (contents.getURL() !== origin && contents.getURL() !== origin + '/') await loadFixture(contents);
+  if (contents.getURL() !== origin && contents.getURL() !== origin + '/') await contents.loadURL(origin);
 }
 app.whenReady().then(async () => {
   let window;
