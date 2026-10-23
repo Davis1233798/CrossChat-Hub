@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CrossChat Hub — 管理中台</title>
+  <link rel="stylesheet" href="/style.css" />
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header><div class="brand"><span class="logo">↔</span> CrossChat <strong>Hub</strong></div><span class="version">Desktop · v0.2</span></header>
+  <main>
+    <section class="hero"><p class="eyebrow">UNIFIED MESSAGING GATEWAY</p><h1>跨平台聊天整合中台</h1><p>統一接收訊息、建立使用者身分對應，並透過官方 Bot/API 傳送跨平台標記通知。</p></section>
+    <section class="panel keypanel" id="key-panel"><h2>管理員驗證</h2><p>輸入由 <code>npm run setup</code> 產生的 <code>ADMIN_API_KEY</code>。金鑰僅保存在當前分頁記憶體。</p><div class="inline"><input id="key" type="password" autocomplete="off" placeholder="ADMIN_API_KEY (64 位 hex)" /><button id="connect">連線</button><span id="state" aria-live="polite">未連線</span></div></section>
+    <div class="stats"><article><small>平台連線</small><b id="n-connections">—</b></article><article><small>身分對應</small><b id="n-identities">—</b></article><article><small>整合訊息</small><b id="n-messages">—</b></article><article><small>待發送 / 失敗</small><b id="n-pending">—</b></article></div>
+    <div class="columns">
+      <section class="panel"><h2>1. 新增平台連線</h2><p>設定平台 Bot Token 與 Webhook 驗證資訊，同一平台可建立多組連線。Discord Gateway 可額外收取有權限的頻道訊息。</p>
+        <form id="connection-form"><label>平台<select name="platform" id="platform"><option value="telegram">Telegram</option><option value="slack">Slack</option><option value="line">LINE</option><option value="discord">Discord</option></select></label><label>連線名稱<input name="name" required placeholder="例如：客服 LINE OA" /></label><label>Bot / Channel Token<input name="token" type="password" autocomplete="new-password" required /></label><label id="secret-label">Webhook Secret<input name="secret" type="password" autocomplete="new-password" required /></label><div id="gateway-options" hidden><input type="checkbox" name="gateway_enabled" /> 啟用 Discord Gateway 收訊（由本機主動連出）<span class="minor">需在 Discord Developer Portal 啟用對應 Intents</span><label><input type="checkbox" name="message_content_intent" /> 已在 Developer Portal 啟用 MESSAGE_CONTENT Intent</label></div><button type="submit">新增連線</button></form>
+      </section>
+      <section class="panel"><h2>2. 建立跨平台身分</h2><p>在不同平台共用同一個別名（alias）。</p>
+        <form id="identity-form"><label>別名（供 @mention 使用）<input name="alias" required placeholder="alice" pattern="[a-z][a-z0-9_.-]{1,31}" /></label><label>顯示名稱<input name="display_name" required placeholder="Alice Chen" /></label><button type="submit">建立身分</button></form>
+        <hr /><h3>連結平台使用者 ID</h3><form id="address-form"><label>身分<select name="identity_id" id="identity-select" required></select></label><label>平台連線<select name="connection_id" id="connection-select" required></select></label><label>平台使用者 ID<input name="external_user_id" required placeholder="從訊息列表複製 author_id" /></label><button type="submit">新增對應</button></form>
+      </section>
+    </div>
+
+    <div class="columns">
+      <section class="panel"><h2>3. Slack OAuth 工作區授權</h2><p>透過 Slack 官方安裝授權取得 Bot Token。每個工作區會建立一個新的加密平台連線；需事先在桌面設定檔／伺服器環境變數配置 Client ID、Client Secret 與 Signing Secret。</p>
+        <form id="slack-oauth-form"><label>連線顯示名稱<input name="name" required value="Slack 工作區" /></label><button type="submit" id="slack-oauth-button">以 Slack OAuth 連接</button><small id="slack-oauth-state" class="minor">檢查設定中</small></form>
+      </section>
+      <section class="panel"><h2>4. Discord OAuth 使用者驗證</h2><p>以 Discord 官方 OAuth 證明使用者 ID 與所選別名的對應。Bot 安裝仍須在 Discord Developer Portal 完成；OAuth 不會提供私人帳號聊天讀取權限。</p>
+        <form id="discord-oauth-form"><label>連結身分<select name="identity_id" id="discord-identity-select" required></select></label><label>已設定的 Discord Bot<select name="connection_id" id="discord-connection-select" required></select></label><button type="submit" id="discord-oauth-button">以 Discord OAuth 驗證</button><button type="button" id="discord-install-button" class="secondary">安裝 Discord Bot 到伺服器</button><small id="discord-oauth-state" class="minor">檢查設定中</small></form>
+      </section>
+    </div>
+    <section class="panel"><h2>5. 雙向聊天室橋接</h2><p>建立「來源平台＋聊天室 → 目標平台＋聊天室」規則。若要雙向同步，請建立 A → B 與 B → A 兩筆規則；只會同步 Bot/API 有權限讀到的新文字訊息。</p>
+      <form id="bridge-form" class="bridge-form"><label>來源連線<select name="source_connection_id" id="bridge-source" required></select></label><label>來源聊天室 ID<input name="source_room_id" placeholder="Slack C... / Discord 頻道 ID" required /></label><label>目標連線<select name="target_connection_id" id="bridge-target" required></select></label><label>目標聊天室 ID<input name="target_room_id" placeholder="Telegram chat ID / LINE group ID" required /></label><button type="submit">新增橋接規則</button></form>
+      <div id="bridge-rules" class="table-wrap"></div>
+    </section>
+    <section class="panel"><h2>OAuth 驗證帳號</h2><div id="verified-accounts" class="table-wrap">尚無資料</div></section>
+    <section class="panel"><h2>Discord Gateway 狀態</h2><div id="gateway-status" class="table-wrap">尚無資料</div></section>
+    <section class="panel"><h2>6. 測試跨平台通知</h2><p>例如在 Discord 用 <code>/tag recipient:line:alice message:請確認需求</code>，或開啟 Gateway 在有權限的頻道輸入 <code>@line:alice</code>，或在 Slack、Telegram、LINE 輸入 <code>@line:alice 請確認需求</code>。</p><form id="send-form" class="send-form"><label>收件者<input name="recipient" required placeholder="line:alice" /></label><label>訊息<input name="text" required placeholder="請確認需求" /></label><button type="submit">發送測試通知</button></form></section>
+    <section class="panel"><div class="section-head"><h2>已連接的平台</h2><button class="secondary" id="refresh">重新整理</button></div><div id="connections" class="table-wrap">尚無資料</div></section>
+    <section class="panel"><h2>使用者對應</h2><div id="addresses" class="table-wrap">尚無資料</div></section>
+    <section class="panel"><h2>統一訊息中心</h2><div id="messages" class="table-wrap">尚無資料</div></section>
+    <section class="panel"><h2>通知轉送狀態</h2><div id="deliveries" class="table-wrap">尚無資料</div></section>
+    <p id="flash" role="status" aria-live="polite"></p>
+  </main>
+  <footer>CrossChat Hub · Official APIs only · Tokens encrypted at rest</footer>
+</body>
+</html>

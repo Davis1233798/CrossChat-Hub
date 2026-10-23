@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+node_modules/
+data/*
+!data/.gitkeep
+*.db
+*.sqlite*
+.DS_Store
+coverage/
+dist/
+build/bin/
+*.dmg
+*.exe
+*.app/
+*.log
+desktop/settings.json
