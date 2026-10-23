@@ -93,3 +93,12 @@ test('pending deletion is restored as blocked and intent is cleared only after d
   assert.deepEqual(intents, ['persist slack', 'clear slack']);
   assert.equal(reset.isBlocked('slack'), false);
 });
+test('an unwritable reset marker stops current writers but does not start deletion', async () => {
+  const { reset, events } = setup({ persistIntent: () => { throw new Error('Disk full'); } });
+  assert.deepEqual(await reset.request('slack'), { state: 'reset-error' });
+  assert.equal(reset.isBlocked('slack'), true);
+  assert.ok(events.includes('destroy slack'));
+  assert.ok(events.includes('revoke slack'));
+  assert.equal(events.includes('clear data'), false);
+  assert.equal(events.includes('unblock network'), false);
+});

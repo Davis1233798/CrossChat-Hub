@@ -17,12 +17,14 @@ function createSessionReset({ getService, getSession, confirm, destroyWriters, r
       blocked.add(id);
       onState(id, 'resetting');
       const clearing = Promise.resolve().then(async () => {
-        await persistIntent(service.id);
         const isolated = getSession(service);
         // Keep background requests from recreating cookies while the profile clears.
         isolated.webRequest.onBeforeRequest((_details, callback) => callback({ cancel: true }));
         destroyWriters(service);
         revokePermissions(id);
+        // Even a full/unwritable disk must leave the current profile stopped.
+        // Do not delete data until the restart-blocking intent is durable.
+        await persistIntent(service.id);
         await isolated.closeAllConnections();
         await isolated.clearAuthCache();
         await isolated.clearData();
