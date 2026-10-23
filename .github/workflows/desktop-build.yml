@@ -83,7 +83,7 @@ jobs:
         if: matrix.platform == 'win'
         shell: pwsh
         run: ./scripts/windows-install-smoke.ps1
-      - name: Verify macOS DMG contains usable application bundle
+      - name: Verify macOS DMG, install copy, native window, normal quit and relaunch
         if: matrix.platform == 'mac'
         shell: bash
         run: |
@@ -94,6 +94,11 @@ jobs:
           trap 'hdiutil detach "$RUNNER_TEMP/crosschat-mount" -quiet || true' EXIT
           test -x "$RUNNER_TEMP/crosschat-mount/CrossChat Hub.app/Contents/MacOS/CrossChat Hub"
           plutil -lint "$RUNNER_TEMP/crosschat-mount/CrossChat Hub.app/Contents/Info.plist"
+          installed_app="$RUNNER_TEMP/crosschat-installed/CrossChat Hub.app"
+          mkdir -p "$(dirname "$installed_app")"
+          ditto "$RUNNER_TEMP/crosschat-mount/CrossChat Hub.app" "$installed_app"
+          swiftc -swift-version 5 scripts/macos-installed-smoke.swift -o "$RUNNER_TEMP/crosschat-macos-smoke"
+          "$RUNNER_TEMP/crosschat-macos-smoke" "$installed_app" "$RUNNER_TEMP/crosschat-installed-profile" "$(node -p "require('./package.json').version")"
       - uses: actions/upload-artifact@v4
         with:
           name: crosschat-${{ matrix.artifact }}
