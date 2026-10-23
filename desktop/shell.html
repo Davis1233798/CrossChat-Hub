@@ -10,7 +10,7 @@
 </head>
 <body>
 <div class="chrome">
-  <div class="app-title"><span class="logo">↔</span><b>CrossChat Hub</b><span class="build">多平台聊天工作區 · 開發預覽</span></div>
+  <div class="app-title"><span class="logo">↔</span><b>CrossChat Hub</b><span class="build">多平台桌面工作區 · 預覽版（LINE 未完成）</span></div>
   <nav aria-label="聊天平台" id="tabs">
     <button type="button" class="tab selected" data-tab="telegram" aria-selected="true" role="tab">Telegram</button>
     <button type="button" class="tab" data-tab="discord" aria-selected="false" role="tab">Discord</button>
@@ -18,10 +18,11 @@
     <button type="button" class="tab" data-tab="whatsapp" aria-selected="false" role="tab">WhatsApp</button>
     <button type="button" class="tab" data-tab="line" aria-selected="false" role="tab">LINE</button>
     <span class="spacer"></span>
+    <button type="button" id="open-browser" title="在系統瀏覽器開啟官方網站（內嵌登入受限時使用）">官方網站 ↗</button>
     <button type="button" id="reload" title="重新載入目前的網站" aria-label="重新載入">↻</button>
     <button type="button" id="quit" title="完全結束程式" aria-label="結束程式">結束</button>
   </nav>
-  <div class="status"><span id="indicator" aria-hidden="true"></span><span id="status">選擇平台登入；登入資料儲存在各平台獨立的本機 Session</span></div>
+  <div class="status"><span id="indicator" aria-hidden="true"></span><span id="status">選擇平台登入；登入資料只留在此裝置，各平台帳號彼此隔離</span></div>
 </div>
 <main id="native-content" aria-live="polite">
   <section id="line" class="native-panel" hidden>

@@ -1,6 +1,6 @@
 {
   "name": "crosschat-hub",
-  "version": "0.4.0-dev.0",
+  "version": "0.4.0-dev.1",
   "private": true,
   "type": "module",
   "description": "Tabbed desktop workspace for official messaging websites (experimental; LINE cannot be embedded)",
@@ -61,7 +61,8 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "runAfterFinish": false
+      "runAfterFinish": false,
+      "include": "build/windows-installer.nsh"
     },
     "artifactName": "CrossChat-Hub-${version}-${os}-${arch}.${ext}",
     "msi": {
