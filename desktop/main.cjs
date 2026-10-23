@@ -2,7 +2,8 @@
 const { app, BrowserWindow, WebContentsView, ipcMain, shell, session, dialog } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { SERVICES, LINE_DOWNLOADS, getService, safeNavigation } = require('./tab-config.cjs');
+const { SERVICES, LINE_DOWNLOADS, getService } = require('./tab-config.cjs');
+const { protectContents } = require('./navigation.cjs');
 const { isOfficialOrigin, canCheckPermission, needsUserApproval } = require('./permissions.cjs');
 
 // Each official site runs in its own hardened, persistent Chromium profile.
@@ -16,6 +17,7 @@ let currentView = null;
 const views = new Map();
 const configuredPartitions = new Set();
 const permissionGrants = new Set();
+let externalPromptPending = false;
 let closing = false;
 
 if (!singleInstance) app.quit();
@@ -89,19 +91,21 @@ function tabView(service) {
   });
   view.setBackgroundColor('#0b1220');
   const wc = view.webContents;
-  wc.setWindowOpenHandler(({ url }) => {
-    if (!safeNavigation(url)) return { action: 'deny' };
-    // Preserve the opener relationship for provider OAuth and phone/QR login.
-    // Each popup inherits the same isolated platform profile.
-    return { action: 'allow', overrideBrowserWindowOptions: {
-      width: 830, height: 790,
-      webPreferences: {
-        partition: service.partition, sandbox: true, nodeIntegration: false,
-        contextIsolation: true, webSecurity: true,
-      },
-    } };
-  });
-  wc.on('will-navigate', (event, url) => { if (!safeNavigation(url)) event.preventDefault(); });
+  protectContents(wc, service, { openExternal: async url => {
+    if (closing || externalPromptPending || !mainWindow || mainWindow.isDestroyed()) return;
+    externalPromptPending = true;
+    try {
+      const { response } = await dialog.showMessageBox(mainWindow, {
+        type: 'question', title: '開啟外部網站',
+        message: `要在系統瀏覽器開啟 ${new URL(url).origin}？`,
+        detail: '此網站不在此平台的內嵌登入清單中。外部登入不會同步回本程式；自訂企業 SSO 可能無法完成登入。',
+        buttons: ['取消', '開啟瀏覽器'], defaultId: 0, cancelId: 0, noLink: true,
+      });
+      if (response === 1 && !closing) await shell.openExternal(url);
+    } catch { announce(service.id, 'external-error'); }
+    finally { externalPromptPending = false; }
+  }, onPopup: popup => attachHotkeys(popup.webContents) });
+  attachHotkeys(wc);
   wc.on('did-start-loading', () => announce(service.id, 'loading'));
   wc.on('did-finish-load', () => announce(service.id, 'loaded'));
   wc.on('did-fail-load', (_event, code, description, _url, isMainFrame) => {
@@ -121,6 +125,7 @@ function chooseTab(id) {
   if (!mainWindow || mainWindow.isDestroyed() || closing) return;
   if (currentView) { mainWindow.contentView.removeChildView(currentView); currentView = null; }
   currentId = id;
+  announce(id, 'selected');
   if (service.kind === 'web') {
     currentView = tabView(service);
     mainWindow.contentView.addChildView(currentView);

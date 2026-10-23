@@ -1,5 +1,7 @@
 # CrossChat Hub — Codex 開發交接與施工規格（consruction.md）
 
+> **2026-10-23 接手開發補充：** 使用者已確認第五個服務沿用 WhatsApp。已在 `codex/messenger-development` 補強導航／redirect／遞迴彈窗限制、快捷鍵頁籤狀態同步、Electron 真實視窗 smoke、依賴鎖定及現行架構文件。本機 35 項測試、Windows MSI/NSIS/ZIP 打包與打包後視窗啟動／正常退出通過；未驗證安裝升級或真人聊天。完整分項證據見 `docs/acceptance.md`。下文原始交接現況保留作歷史基準，LINE 與真人 E2E 仍是正式發行阻礙。
+
 > 更新日期：2026-10-23（Asia/Taipei）  
 > 專案：https://github.com/Davis1233798/CrossChat-Hub  
 > **本檔刻意採用使用者指定檔名 `consruction.md`（不是 `construction.md`）。**  

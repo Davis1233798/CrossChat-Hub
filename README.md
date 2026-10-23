@@ -39,9 +39,10 @@
 ## 開發
 
 ```bash
-npm install
+npm ci
 npm run check
 npm test
+npm run test:desktop
 npm run desktop
 ```
 
@@ -55,3 +56,12 @@ npm run desktop
 - 內嵌瀏覽器無法登入時可開啟官方網站，但**外部瀏覽器登入不會自動同步回此程式**。
 - Windows NSIS EXE 安裝程式在更新／解除安裝前嘗試終止既有 CrossChat Hub 程序，以避免寫入正在使用的 EXE。MSI 仍受 Windows Installer 的鎖定檔案行為限制。
 - 未加入任意 Chrome 擴充功能，也沒有自動化讀取私人訊息或替你在另一個平台傳送訊息。
+
+## 本輪開發補強
+
+- 已確認第五個服務沿用 WhatsApp。
+- 官方網站、重新導向與多層登入彈窗共用導航限制；一般外部 HTTPS 連結經確認後開啟系統瀏覽器。
+- Slack 的已列入清單之 Google／Microsoft／Apple 登入頁可保留內嵌流程；自訂企業 SSO 尚未支援，也未完成真人 SSO 驗收。
+- 登入彈窗標題顯示目前來源；第三方登入網域不會獲得聊天平台的媒體／通知權限。
+- 修正 Ctrl/Cmd+數字切換後頁籤選取狀態未同步；加入使用獨立暫存資料目錄的 Electron 實際視窗 smoke test。
+- 最新測試範圍及未解阻礙請見 [驗收紀錄](docs/acceptance.md)。

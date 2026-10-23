@@ -1,28 +1,35 @@
-# CrossChat Hub roadmap
+# CrossChat Hub development priorities
 
-## v0.1 done
-- Official Bot API adapters: Slack / Discord interactions / Telegram / LINE
-- Cross-platform `@platform:alias` and administrator identity mapping
-- Encrypted SQLite connection credentials, webhook verification and durable outbox
+## Current source implementation
 
-## v0.2 source implemented; native installer build pending external CI
-- [x] Electron desktop entrypoint for Windows and macOS, automatic userData store
-- [x] Build configurations, two-OS GitHub Actions packaging workflows
-- [x] Slack OAuth v2 multi-workspace installation, state validation, token rotation
-- [x] Discord OAuth user identity verification with PKCE S256
-- [x] Discord guild bot installation link
-- [x] Multiple Discord Gateway sessions with heartbeats and reconnect/resume
-- [x] Explicit one-way and two-way text room bridge rules, dedupe and opt-in routing
-- [x] Dashboard to manage OAuth flows, bridge rules and Gateway status
-- [x] Tests with mocked official platform APIs and Gateway
-- [ ] Verify signed installable `.exe`, `.dmg` on actual Windows/macOS machines
-- [ ] Live platform E2E testing with user-supplied credentials/permissions
+- Four official website views with isolated persistent profiles and five tabs.
+- Explicit LINE unsupported panel; WhatsApp confirmed as fifth target (2026-10-23).
+- Navigation/redirect/nested-popup controls and origin-scoped permission prompts.
+- Keyboard tab synchronization and isolated-profile native Electron smoke test.
+- Legacy optional Bot/OAuth/MTProto backend with mocked API tests.
 
-## v0.3 production work
-- [ ] Hosted public HTTPS webhook/OAuth callback broker + secure desktop relaying
-- [ ] Scoped user permissions, workspace authorization, verified cross-platform IDs
-- [ ] Attachments and cross-platform thread/reply mapping
-- [ ] Database retention/deletion controls and privacy-friendly consent flows
-- [ ] Cloud sync / multi-device state with strict tenant isolation
-- [ ] Outbox leases, platform rate limiting, metrics and failure recovery
-- [ ] Optional native Go/Wails or Rust/Tauri rewrite after desktop API stability
+## P0: release blockers
+
+- Authorized, maintainable LINE personal-chat embedding solution or approved scope change.
+- Real login, message send/receive, attachments, logout and restart retention on
+  Telegram, Discord, Slack (including SSO) and WhatsApp on all supported OS targets.
+- Graceful update/shutdown with persistent-session flushing, Windows clean install,
+  upgrade from previous versions, uninstall, and MSI/NSIS coexistence policy.
+- Actual macOS Intel/ARM launch/close/update checks, signing and notarization.
+- User-facing per-platform local data deletion with safe popup/session teardown.
+
+## P1: authorized cross-platform notifications
+
+- Self-service consent, identity binding, destination confirmation and revocation.
+- Official API delivery on supported destinations, retries, deduplication and audit.
+- At least one real end-to-end platform pair; unsupported pairs clearly identified.
+- No self-bots or credential/cookie extraction from embedded personal accounts.
+
+## P2: maintainability
+
+- Provider SSO compatibility evidence and configurable reviewed enterprise IdPs.
+- Reproducible builds, installer evidence and version-specific release notes.
+- Retention/deletion policy and privacy-preserving diagnostics.
+
+Source implementation, mock tests, packaging and real messaging acceptance are
+separate milestones. Consult [acceptance.md](acceptance.md) before publishing.

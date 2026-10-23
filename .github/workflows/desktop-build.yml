@@ -2,7 +2,7 @@ name: Desktop packages and preview release
 
 on:
   push:
-    branches: [main, 'feature/**']
+    branches: [main, 'feature/**', 'codex/**']
     tags: ['v*']
   workflow_dispatch:
 
@@ -61,7 +61,7 @@ jobs:
             fi
           fi
       - name: Install Electron packaging dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Build desktop installers
         run: npm run desktop:${{ matrix.platform }} -- --${{ matrix.arch }} --publish never
       - name: Validate generated installers

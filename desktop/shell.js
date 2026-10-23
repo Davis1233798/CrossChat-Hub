@@ -5,7 +5,7 @@
   const status = document.getElementById('status');
   const saved = window.localStorage.getItem('crosschat-last-tab');
   let selected = tabs.some(t => t.dataset.tab === saved) ? saved : 'telegram';
-  function select(id) {
+  function select(id, notify = true) {
     if (!tabs.some(tab => tab.dataset.tab === id)) return;
     selected = id;
     window.localStorage.setItem('crosschat-last-tab', id);
@@ -18,7 +18,7 @@
     line.hidden = id !== 'line';
     connecting.hidden = id === 'line';
     status.textContent = id === 'line' ? 'LINE：官方個人聊天客戶端無法可靠嵌入 Electron' : `${id} · 官方網頁版 · 登入會話保留在此電腦`;
-    window.crosschatDesktop.switchTab(id).catch(() => { status.textContent = '分頁載入失敗'; });
+    if (notify) window.crosschatDesktop.switchTab(id).catch(() => { status.textContent = '分頁載入失敗'; });
   }
   tabs.forEach(tab => tab.addEventListener('click', () => select(tab.dataset.tab)));
   document.getElementById('reload').addEventListener('click', () => window.crosschatDesktop.reloadTab(selected));
@@ -26,6 +26,7 @@
   document.getElementById('quit').addEventListener('click', () => window.crosschatDesktop.quit());
   document.querySelectorAll('[data-line-link]').forEach(button => button.addEventListener('click', () => window.crosschatDesktop.openLineOfficial(button.dataset.lineLink)));
   window.crosschatDesktop.onTabStatus(({ id, state, detail }) => {
+    if (state === 'selected') { select(id, false); return; }
     const tab = tabs.find(t => t.dataset.tab === id);
     if (state === 'title' && tab) {
       const old = tab.querySelector('.unread');
@@ -40,6 +41,7 @@
       loading: '正在載入…',
       downloaded: '附件儲存完成',
       'download-error': '附件下載中斷',
+      'external-error': '無法開啟外部網站，請稍後再試',
       unsupported: 'LINE 只能使用官方獨立客戶端或 Chrome 擴充功能',
     };
     status.textContent = `${id} · ${labels[state] ?? state}`;
