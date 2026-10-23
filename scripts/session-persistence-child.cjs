@@ -9,6 +9,13 @@ if (!profile || !path.isAbsolute(profile) || !/^http:\/\/127\.0\.0\.1:\d+$/.test
   throw new Error('Only a disposable profile and loopback test origin are accepted');
 }
 app.setPath('userData', profile);
+// Resolve test web views to the loopback fixture before the real entrypoint
+// imports configuration. Production configuration and navigation policy stay
+// unchanged; no competing live-provider navigation can race fixture inspection.
+const configPath = require.resolve('../desktop/tab-config.cjs');
+const config = require(configPath);
+const fixtureServices = config.SERVICES.map(service => service.kind === 'web' ? { ...service, url: origin } : service);
+require.cache[configPath].exports = { ...config, SERVICES: fixtureServices, getService: id => fixtureServices.find(service => service.id === id) || null };
 require('../desktop/main.cjs');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 app.whenReady().then(async () => {
