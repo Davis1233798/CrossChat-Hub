@@ -142,6 +142,61 @@ Electron code intact until feasibility is established:
    must preserve isolation, no-Node remote content, secure navigation, updater and
    installer behavior already verified in the existing branch.
 
+## Signed-install route: pinned-source review, not runtime evidence
+
+Reviewed Chromium `144.0.7559.59` and CEF commit
+`5f7e6711711e0e4bb213e311458f60a6a2e8e3cc`, matching the local binary header.
+The ordinary official-store UI remains the next experiment before changing CEF
+internals. No host was launched or installation attempted for this review.
+
+The source establishes these dependencies:
+
+- Chromium's [API feature definition](https://github.com/chromium/chromium/blob/144.0.7559.59/chrome/common/extensions/api/_api_features.json#L1082-L1099)
+  permits the store's own HTTPS pages to use its installation bridge. Merely
+  supporting MV3 does not establish that this bridge is usable in a given binary.
+- The [store installation implementation](https://github.com/chromium/chromium/blob/144.0.7559.59/chrome/browser/extensions/api/webstore_private/webstore_private_api.cc#L896-L940)
+  uses a native permission dialog. Its completion path requires an approval for
+  the expected extension ID in the matching profile and rejects guest/off-record
+  contexts. Browser profile services, installation tracking, sender WebContents,
+  and native dialog parenting must all work. Do not call this private bridge from
+  injected JavaScript or manufacture an approval.
+- The [download/install handoff](https://github.com/chromium/chromium/blob/144.0.7559.59/chrome/browser/extensions/webstore_installer.cc#L657-L674)
+  carries the expected ID into the CRX installer. The [CRX installer](https://github.com/chromium/chromium/blob/144.0.7559.59/chrome/browser/extensions/crx_installer.cc#L186-L211)
+  selects the verification format and invokes the sandboxed unpacker. An unpacked
+  directory load or a downloaded hash does not exercise this signed install path.
+- Pinned CEF's [Chrome integration](https://github.com/chromiumembedded/cef/blob/5f7e6711711e0e4bb213e311458f60a6a2e8e3cc/libcef/browser/chrome/chrome_browser_main_extra_parts_cef.cc#L27-L40)
+  associates its global request context with the initial Chrome profile; its
+  [toolkit setup](https://github.com/chromiumembedded/cef/blob/5f7e6711711e0e4bb213e311458f60a6a2e8e3cc/libcef/browser/chrome/chrome_browser_main_extra_parts_cef.cc#L73-L76)
+  wraps Chrome's constrained-window client. These are relevant foundations,
+  **not proof** that our sample displays the store's install dialog successfully.
+
+The checked-in native overlay currently hardcodes our synthetic fixture URL,
+requires a fresh profile per run, and implements no store/LINE navigation mode.
+Its Chrome-style BrowserView is not a completed official-extension installer.
+Fresh-only profiles serve synthetic compatibility testing; they cannot validate
+production session retention. The pinned binary is an older compatibility
+baseline, not a supported current-security release.
+
+The next reviewable engineering artifact should be a **separate explicit
+store/pre-login mode**, leaving the synthetic fixture mode intact. Its initial
+URL should be the exact official LINE store listing, with a distinct user action
+to navigate the existing main BrowserView to
+`chrome-extension://ophjlpahpchlmihnnnihgmmeilfjmjjc/index.html` after installation.
+Do not add an arbitrary start-URL switch. Keep sandbox and certificate checks;
+keep account-mode remote debugging disabled. Store subresources and legitimate
+navigation requirements must be observed rather than replaced by success stubs.
+
+When execution is available, record these independent gates: official listing
+renders; an actual installation action displays the real permission dialog;
+normal signed installation completes; the extensions UI reports official ID
+`ophjlpahpchlmihnnnihgmmeilfjmjjc`; direct original `index.html` navigation stays
+in the main native window; original login UI renders without the earlier startup
+error. A missing/disabled install button, dialog-parent failure, download error,
+or signature rejection identifies a different failure stage. None has yet been
+observed in this new mode. Only after pre-login succeeds should manual account
+acceptance begin, with a separately designed persistent profile and no debug
+listener. Official ID alone does not prove login or personal chat works.
+
 ## Distribution/authorization is a separate gate
 
 The [LINE Software Terms](https://terms.line.me/line_PC_terms) reserve software
