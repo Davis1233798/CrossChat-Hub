@@ -59,9 +59,12 @@ See [acceptance.md](acceptance.md) for the evidence matrix and remaining gates.
 ## Installation and release constraints
 
 Windows builds produce NSIS EXE, MSI and ZIP; macOS builds produce separate x64
-and arm64 DMG/ZIP. The NSIS hook currently force-terminates an existing executable;
-graceful update, MSI migration/conflicts and preservation of pending site data
-remain unresolved. Do not treat MSI and NSIS as verified interchangeable upgrades.
+and arm64 DMG/ZIP. NSIS requests normal window close and waits for the executable
+to exit; it blocks installation with an error if a matching process remains.
+It does not force-kill processes. This conservative name check may also block if
+another Windows user is running the app. Old background-only versions may need
+their normal quit action. MSI migration/conflicts and preservation of pending
+site data remain unresolved. Do not treat MSI and NSIS as verified interchangeable upgrades.
 The normal user flow must never depend on `repair-windows.ps1`.
 
 Only matching version tags publish unsigned prereleases. Branch pushes and manual

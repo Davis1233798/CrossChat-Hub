@@ -69,6 +69,21 @@ images, passwords, session files, real message text or tokens in evidence.
 
 ## Remaining product blockers
 
+## Installer regression under investigation
+
+Remote run `39948891586` passed all three native-window smokes and both macOS
+packaging/mount jobs, but Windows NSIS installation returned `0xC0000005` before
+launch. The subsequent fix replaces both the old unconditional force-kill hook
+and the default nsExec/getProcessInfo process-check path with a native WM_CLOSE
+request plus ExecWait-based system task listing. Any remaining process or failed
+check blocks modification with exit code 2; no force termination occurs.
+The NSIS installer compiles locally. The new CI lifecycle script requires a clean
+runner and checks install, normal close, same-version reinstall while running,
+relaunch, and uninstall while running. Verification of that fix is pending.
+Same-version reinstall must not be described as an upgrade from v0.3.1.
+
+## Remaining product blockers (release gates)
+
 LINE has no authorized embedded personal-chat solution in this implementation.
 The official Messaging API is for bots/Official Accounts, not a replacement for
 personal desktop chats: https://developers.line.biz/en/docs/messaging-api/overview/
