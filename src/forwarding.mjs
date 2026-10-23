@@ -45,6 +45,9 @@ export function parseChatRoute(input) {
 const exactId = value => typeof value === 'string' && value.trim().length > 0;
 const validChat = chat => chat && platforms.has(chat.platform) && exactId(chat.accountId) && exactId(chat.chatId);
 const chatKey = chat => JSON.stringify([chat.platform, chat.accountId, chat.chatId]);
+const isCompose = source => source?.kind === 'compose' && exactId(source.draftId);
+const isForward = source => source?.kind !== 'compose' && validChat(source) && exactId(source.messageId);
+const sourceKey = source => isCompose(source) ? ['compose', source.draftId] : ['forward', source.platform, source.accountId, source.chatId, source.messageId];
 
 // resolveChat/resolveMember return arrays of exact adapter-owned IDs. Display
 // names never become IDs, and ambiguity is rejected rather than picking first.
@@ -52,7 +55,7 @@ const chatKey = chat => JSON.stringify([chat.platform, chat.accountId, chat.chat
 export async function prepareForward({ route, source, attachments = [], trace = null }, adapter) {
   if (route?.status !== 'parsed' || !platforms.has(route.platform) || !exactId(route.chatName) ||
       typeof route.text !== 'string' || (route.memberName !== null && !exactId(route.memberName)) ||
-      !validChat(source) || !exactId(source.messageId)) return invalid('missing-exact-source-or-route');
+      (!isCompose(source) && !isForward(source))) return invalid('missing-exact-source-or-route');
   if (!Array.isArray(attachments)) return invalid('invalid-attachments');
   if (attachments.some(a => !a || !exactId(a.id) || !exactId(a.name) || !exactId(a.mimeType) || !Number.isSafeInteger(a.size) || a.size < 0)) return invalid('invalid-attachment-manifest');
   if (!route.text.trim() && !attachments.length) return invalid('empty-message');
@@ -73,14 +76,15 @@ export async function prepareForward({ route, source, attachments = [], trace = 
     if (!exactId(members[0]?.memberId)) return invalid('adapter-returned-invalid-member');
     mention = { memberId: members[0].memberId, required: true };
   }
+  if (isCompose(source) && trace !== null) return invalid('compose-cannot-carry-forward-trace');
   const origin = trace?.origin ?? source;
   const visited = trace?.visited ?? [];
-  if (!validChat(origin) || !exactId(origin.messageId) || !Array.isArray(visited) || visited.some(c => !validChat(c))) return invalid('invalid-forward-trace');
-  if (visited.length >= 8 || [source, origin, ...visited].some(c => chatKey(c) === chatKey(target))) return { status: 'blocked', reason: 'forward-loop' };
-  const dedupeKey = createHash('sha256').update(JSON.stringify([origin.platform, origin.accountId, origin.chatId, origin.messageId, target.platform, target.accountId, target.chatId, mention?.memberId ?? null])).digest('hex');
+  if ((!isCompose(origin) && !isForward(origin)) || !Array.isArray(visited) || visited.some(c => !validChat(c))) return invalid('invalid-forward-trace');
+  if (visited.length >= 8 || [source, origin, ...visited].filter(validChat).some(c => chatKey(c) === chatKey(target))) return { status: 'blocked', reason: 'forward-loop' };
+  const dedupeKey = createHash('sha256').update(JSON.stringify([sourceKey(origin), target.platform, target.accountId, target.chatId, mention?.memberId ?? null])).digest('hex');
   return { status: 'prepared', plan: { version: 1, source: { ...source }, target: { ...target }, mention,
     text: route.text, attachments: structuredClone(attachments), dedupeKey,
-    trace: { origin: { ...origin }, visited: [...visited.map(c => ({ ...c })), { ...source }] } } };
+    trace: { origin: { ...origin }, visited: [...visited.map(c => ({ ...c })), ...(isForward(source) ? [{ ...source }] : [])] } } };
 }
 
 // ledger.claim MUST atomically and durably reserve a key before any UI action;

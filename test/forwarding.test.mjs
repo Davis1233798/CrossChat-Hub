@@ -92,3 +92,24 @@ test('ambiguous send outcomes and missing native mention receipt never become su
     assert.equal((await executeForward(prepared, client, ledger)).status, 'duplicate');
   }
 });
+
+test('Hub compose uses a local draft origin instead of inventing a platform message', async () => {
+  const localSource = { kind: 'compose', draftId: 'local-draft-1' };
+  const result = await prepareForward({ source: localSource, route }, adapter());
+  assert.equal(result.status, 'prepared');
+  assert.deepEqual(result.plan.source, localSource);
+  assert.deepEqual(result.plan.trace, { origin: localSource, visited: [] });
+  assert.equal((await prepareForward({ source: localSource, route }, adapter())).plan.dedupeKey, result.plan.dedupeKey);
+  assert.notEqual((await prepareForward({ source: { kind: 'compose', draftId: 'local-draft-2' }, route }, adapter())).plan.dedupeKey, result.plan.dedupeKey);
+  assert.notEqual((await prepareForward({ source, route }, adapter())).plan.dedupeKey, result.plan.dedupeKey);
+  assert.equal((await prepareForward({ source: { kind: 'compose', draftId: '' }, route }, adapter())).status, 'invalid');
+  assert.equal((await prepareForward({ source: localSource, route, trace: { origin: source, visited: [] } }, adapter())).status, 'invalid');
+});
+test('forwarding a Hub-originated message preserves local origin and actual visited chat', async () => {
+  const origin = { kind: 'compose', draftId: 'original-local-draft' };
+  const result = await prepareForward({ source, route, trace: { origin, visited: [] } }, adapter());
+  assert.equal(result.status, 'prepared');
+  assert.deepEqual(result.plan.trace, { origin, visited: [source] });
+  const firstCompose = await prepareForward({ source: origin, route }, adapter());
+  assert.equal(firstCompose.plan.dedupeKey, result.plan.dedupeKey);
+});

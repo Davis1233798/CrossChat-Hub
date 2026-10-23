@@ -18,8 +18,13 @@ so it cannot accidentally send a DM to alias `group`.
 
 1. `parseChatRoute(text)` parses the destination and message body.
 2. `prepareForward({ route, source, attachments, trace }, adapter)` resolves a
-   single exact target. The source has `platform`, `accountId`, `chatId`, and
-   `messageId`; adapter target IDs must identify the logged-in personal account
+   single exact target. Forwarding an existing message requires a source with
+   `platform`, `accountId`, `chatId`, and `messageId`. A new Hub composer message
+   instead uses `{ kind: 'compose', draftId }`, with a main-process-generated
+   local draft ID; it never invents a message from another platform. Preserve
+   this ID across retries, and create a new one for an intentional new send.
+   The local draft and external-message dedupe namespaces are distinct.
+   Adapter target IDs must identify the logged-in personal account
    and exact chat. Duplicate names require selection outside this module.
 3. A personal adapter exposes `platform`, `accountKind: 'personal'`,
    `capabilities: { sendText, nativeMention, attachments }`,
@@ -39,6 +44,12 @@ so it cannot accidentally send a DM to alias `group`.
    included attachments. It never asserts recipient
    delivery or read status. Adapters must establish that evidence from the
    actual client, not fabricate receipts from clicked buttons or typed text.
+
+The trusted main process owns parsed/resolved plans, draft IDs and ledger keys.
+Renderer IPC may submit composer text and reference a draft, but must never
+accept an arbitrary renderer-supplied `prepared` plan, target ID or dedupe key
+for execution. This module is an internal orchestration boundary, not an IPC
+authorization layer. Plans must be revalidated after account/chat changes.
 
 Forwarding keeps the original platform/account/chat/message tuple in `trace`,
 plus visited chats. Same-chat, returning-to-origin, visited-chat and eight-hop
