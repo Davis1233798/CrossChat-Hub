@@ -15,9 +15,10 @@ async function freePort() {
   return port;
 }
 
-function callbackRequest(port, path, { method = 'GET', host = `localhost:${port}` } = {}) {
+function callbackRequest(port, path, { method = 'GET', host = `localhost:${port}`, family = 4 } = {}) {
   return new Promise((resolve, reject) => {
-    const req = request({ hostname: '127.0.0.1', port, path, method, headers: { host } }, response => {
+    const hostname = family === 6 ? '::1' : '127.0.0.1';
+    const req = request({ hostname, family, port, path, method, headers: { host } }, response => {
       let body = '';
       response.setEncoding('utf8');
       response.on('data', chunk => { body += chunk; });
@@ -26,6 +27,21 @@ function callbackRequest(port, path, { method = 'GET', host = `localhost:${port}
     req.once('error', reject);
     req.end();
   });
+}
+
+async function ipv6Available() {
+  const server = createServer();
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen({ port: 0, host: '::1', ipv6Only: true }, resolve);
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (server.listening) await new Promise(resolve => server.close(resolve));
+  }
 }
 
 function jsonResponse(payload, status = 200) {
@@ -108,6 +124,52 @@ test('one authorization can be active at a time and cancellation closes the list
   first.cancel();
   assert.equal((await first.completion).reason, 'authorization-cancelled');
   client.close();
+  const v4Probe = createServer();
+  await new Promise((resolve, reject) => { v4Probe.once('error', reject); v4Probe.listen(port, '127.0.0.1', resolve); });
+  await new Promise(resolve => v4Probe.close(resolve));
+  if (await ipv6Available()) {
+    const v6Probe = createServer();
+    await new Promise((resolve, reject) => { v6Probe.once('error', reject); v6Probe.listen({ port, host: '::1', ipv6Only: true }, resolve); });
+    await new Promise(resolve => v6Probe.close(resolve));
+  }
+});
+
+test('registered localhost callback works over IPv4 and IPv6 and is consumed only once', async t => {
+  if (!(await ipv6Available())) { t.skip('IPv6 loopback unavailable on this host'); return; }
+  for (const family of [4, 6]) {
+    const port = await freePort();
+    let exchanges = 0;
+    const client = createSlackPkce({
+      clientId: '12345.67890', registeredLoopbackRedirectUri: `http://localhost:${port}/slack/oauth/callback`,
+      fetchFn: async () => { exchanges++; return jsonResponse({ ok: true, team: { id: 'T123' }, authed_user: { id: 'U456', access_token: 'token' } }); },
+    });
+    const login = await client.begin();
+    assert.equal(login.status, 'ready');
+    const state = new URL(login.authorizeUrl).searchParams.get('state');
+    const reply = await callbackRequest(port, `/slack/oauth/callback?state=${state}&code=code-${family}`, { family });
+    assert.equal(reply.status, 200);
+    assert.equal((await login.completion).status, 'authorized');
+    assert.equal(exchanges, 1);
+    client.close();
+  }
+});
+
+test('simultaneous IPv4 and IPv6 callbacks exchange a valid code once', async t => {
+  if (!(await ipv6Available())) { t.skip('IPv6 loopback unavailable on this host'); return; }
+  const port = await freePort();
+  let exchanges = 0;
+  const client = createSlackPkce({
+    clientId: '12345.67890', registeredLoopbackRedirectUri: `http://localhost:${port}/slack/oauth/callback`,
+    fetchFn: async () => { exchanges++; return jsonResponse({ ok: true, team: { id: 'T123' }, authed_user: { id: 'U456', access_token: 'token' } }); },
+  });
+  const login = await client.begin();
+  const state = new URL(login.authorizeUrl).searchParams.get('state');
+  const path = `/slack/oauth/callback?state=${state}&code=single-use-code`;
+  const replies = await Promise.allSettled([callbackRequest(port, path, { family: 4 }), callbackRequest(port, path, { family: 6 })]);
+  assert.equal((await login.completion).status, 'authorized');
+  assert.equal(exchanges, 1);
+  assert.ok(replies.some(item => item.status === 'fulfilled' && item.value.status === 200));
+  client.close();
 });
 
 test('a busy registered callback port fails closed before returning an authorization URL', async () => {
@@ -121,6 +183,22 @@ test('a busy registered callback port fails closed before returning an authoriza
     const client = createSlackPkce({ clientId: '12345.67890', registeredLoopbackRedirectUri: `http://localhost:${port}/slack/oauth/callback` });
     const result = await client.begin();
     assert.deepEqual(result, { status: 'unavailable', reason: 'loopback-listener-failed' });
+  } finally {
+    await new Promise(resolve => blocker.close(resolve));
+  }
+});
+
+test('an IPv6 bind failure cleans up the already-bound IPv4 listener', async t => {
+  if (!(await ipv6Available())) { t.skip('IPv6 loopback unavailable on this host'); return; }
+  const port = await freePort();
+  const blocker = createServer();
+  await new Promise((resolve, reject) => { blocker.once('error', reject); blocker.listen({ port, host: '::1', ipv6Only: true }, resolve); });
+  try {
+    const client = createSlackPkce({ clientId: '12345.67890', registeredLoopbackRedirectUri: `http://localhost:${port}/slack/oauth/callback` });
+    assert.deepEqual(await client.begin(), { status: 'unavailable', reason: 'loopback-listener-failed' });
+    const probe = createServer();
+    await new Promise((resolve, reject) => { probe.once('error', reject); probe.listen(port, '127.0.0.1', resolve); });
+    await new Promise(resolve => probe.close(resolve));
   } finally {
     await new Promise(resolve => blocker.close(resolve));
   }

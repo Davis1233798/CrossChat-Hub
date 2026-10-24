@@ -139,12 +139,12 @@ export function createSlackPkce({
     authorizeUrl.searchParams.set('code_challenge', challenge);
     authorizeUrl.searchParams.set('code_challenge_method', 'S256');
 
-    const server = createServerFn();
+    const servers = [createServerFn(), createServerFn()];
     let timer = null;
     let settle;
     let resolveReady;
     let readyResolved = false;
-    const transaction = { server, abortController: new AbortController(), settled: false };
+    const transaction = { servers, abortController: new AbortController(), settled: false };
     const completion = new Promise(resolve => { settle = resolve; });
     const ready = new Promise(resolve => { resolveReady = resolve; });
     const settleReady = result => {
@@ -152,15 +152,18 @@ export function createSlackPkce({
       readyResolved = true;
       resolveReady(result);
     };
-    function closeServer() {
+    function closeServer(server) {
       if (server.listening) server.close();
       else server.once('listening', () => { if (server.listening) server.close(); });
+    }
+    function closeServers() {
+      for (const server of servers) closeServer(server);
     }
     const finish = async (result, shouldExchange = false, code = null) => {
       if (transaction.settled) return;
       transaction.settled = true;
       clearTimeout(timer);
-      closeServer();
+      closeServers();
       if (!shouldExchange) transaction.abortController.abort();
       if (!readyResolved) settleReady({ status: 'unavailable', reason: result?.reason ?? 'loopback-listener-failed' });
       const output = shouldExchange
@@ -174,10 +177,10 @@ export function createSlackPkce({
       response.end(text);
     };
 
-    server.on('request', (request, response) => {
+    const handleRequest = (request, response) => {
       if (transaction.settled) return rejectRequest(response, 410, 'This sign-in request is no longer active.');
       const peer = request.socket.remoteAddress;
-      const peerIsLoopback = peer === '127.0.0.1' || peer === '::ffff:127.0.0.1';
+      const peerIsLoopback = peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1';
       if (!peerIsLoopback || request.headers.host !== `localhost:${redirect.port}`) return rejectRequest(response, 403, 'This request is not valid.');
       if (request.method !== 'GET') return rejectRequest(response, 405, 'This request is not valid.');
       if (request.url.length > MAX_CODE_LENGTH + MAX_STATE_LENGTH + 1024 ||
@@ -207,7 +210,7 @@ export function createSlackPkce({
         return;
       }
       rejectRequest(response, 400, 'This request is not valid.');
-    });
+    };
     const login = {
       status: 'ready',
       authorizeUrl: authorizeUrl.toString(),
@@ -218,19 +221,34 @@ export function createSlackPkce({
         void finish(safeFailure('authorization-cancelled'));
       },
     };
-    server.once('listening', () => {
-      settleReady(transaction.settled ? { status: 'unavailable', reason: 'loopback-listener-failed' } : login);
-    });
-    server.on('error', () => {
-      void finish(safeFailure('loopback-listener-failed'));
-      settleReady({ status: 'unavailable', reason: 'loopback-listener-failed' });
-    });
+    for (const server of servers) {
+      server.on('request', handleRequest);
+      server.on('error', () => { void finish(safeFailure('loopback-listener-failed')); });
+    }
     const startedAt = now();
     transaction.finish = finish;
     active = transaction;
     timer = setTimeout(() => { void finish(safeFailure('authorization-timeout')); }, timeoutMs);
     timer.unref?.();
-    server.listen(redirect.port, '127.0.0.1');
+    const listeners = [
+      { server: servers[0], options: { port: redirect.port, host: '127.0.0.1' } },
+      { server: servers[1], options: { port: redirect.port, host: '::1', ipv6Only: true } },
+    ];
+    const bindPromises = listeners.map(({ server, options }) => new Promise((resolve, reject) => {
+      const onListening = () => { server.removeListener('error', onError); resolve(); };
+      const onError = error => { server.removeListener('listening', onListening); reject(error); };
+      server.once('listening', onListening);
+      server.once('error', onError);
+      server.listen(options);
+    }));
+    const allBound = Promise.all(bindPromises).then(() => true, () => false);
+    const bound = await allBound;
+    if (!bound) {
+      void finish(safeFailure('loopback-listener-failed'));
+      settleReady({ status: 'unavailable', reason: 'loopback-listener-failed' });
+    } else {
+      settleReady(transaction.settled ? { status: 'unavailable', reason: 'loopback-listener-failed' } : login);
+    }
     return ready;
   }
 
