@@ -7,6 +7,7 @@ const { protectContents } = require('./navigation.cjs');
 const { createShutdown, flushSessions } = require('./lifecycle.cjs');
 const { createSessionReset } = require('./session-data.cjs');
 const { createResetIntentStore } = require('./reset-intent.cjs');
+const { createWorkspaceState } = require('./workspace-state.cjs');
 const { createForwardingLedger } = require('./forwarding-ledger.cjs');
 const { registerForwardingIpc } = require('./forwarding-ipc.cjs');
 const { isOfficialOrigin, canCheckPermission, needsUserApproval } = require('./permissions.cjs');
@@ -28,6 +29,20 @@ const permissionVersions = new Map();
 const activeDownloads = new Map();
 let externalPromptPending = false;
 let closing = false;
+const workspaceState = createWorkspaceState(path.join(app.getPath('userData'), 'workspace-state'));
+
+function rememberWorkspace(contents, service) {
+  if (service.id !== 'slack') return;
+  const record = (_event, url, isMainFrame = true) => {
+    if (!isMainFrame || closing || contents.isDestroyed() || profileReset.isBlocked(service.id)) return;
+    try { workspaceState.record(url); }
+    catch { announce(service.id, 'workspace-save-error'); }
+  };
+  // did-navigate is top-level only; its third argument is an HTTP status,
+  // whereas did-navigate-in-page supplies the actual main-frame flag.
+  contents.on('did-navigate', (event, url) => record(event, url, true));
+  contents.on('did-navigate-in-page', record);
+}
 
 if (!singleInstance) app.quit();
 
@@ -133,7 +148,9 @@ function tabView(service) {
     popupWindows.set(popup, service.id);
     popup.once('closed', () => popupWindows.delete(popup));
     attachHotkeys(popup.webContents);
+    rememberWorkspace(popup.webContents, service);
   } });
+  rememberWorkspace(wc, service);
   attachHotkeys(wc);
   wc.on('did-start-loading', () => report('loading'));
   wc.on('did-finish-load', () => report('loaded'));
@@ -145,7 +162,12 @@ function tabView(service) {
     report('title', count ? String(Math.min(Number(count), 999)) : '');
   });
   views.set(service.id, view);
-  wc.loadURL(service.url).catch(error => report('failed', String(error.message)));
+  let initialUrl = service.url;
+  if (service.id === 'slack') {
+    try { initialUrl = workspaceState.read() || initialUrl; }
+    catch { report('workspace-save-error'); }
+  }
+  wc.loadURL(initialUrl).catch(error => report('failed', String(error.message)));
   return view;
 }
 function chooseTab(id) {
@@ -179,7 +201,11 @@ function destroyServiceWriters(service) {
 }
 const resetIntents = createResetIntentStore(path.join(app.getPath('userData'), 'pending-profile-resets'), SERVICES.filter(service => service.kind === 'web').map(service => service.id));
 const profileReset = createSessionReset({
-  initialBlocked: resetIntents.pending(), persistIntent: resetIntents.mark, clearIntent: resetIntents.clear,
+  initialBlocked: resetIntents.pending(), persistIntent: resetIntents.mark,
+  clearIntent: id => {
+    if (id === 'slack') workspaceState.clear();
+    resetIntents.clear(id);
+  },
   getService, getSession: service => configureSession(service),
   isClosing: () => closing,
   confirm: async service => {
