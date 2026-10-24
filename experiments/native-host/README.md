@@ -226,3 +226,20 @@ no parent was killed to manufacture recovery and no broker remained. Two unit
 tests cover absent-flag isolation and packaged-mode early rejection; ordinary
 desktop smoke also passed. These checks do not establish broker-hard-kill
 recovery or recovery from every possible native API failure.
+
+`CompatibilityProbe.exe` is a read-only metadata tool: no arguments, titles,
+chat text, input, parenting, positioning, launch or termination. It reports
+PID/start time, executable path, main-HWND ownership/root/visibility and DPI
+context for native LINE candidates and hosts in this checkout. A 2026-10-24
+probe found the existing LINE HWND at PerMonitorV2 (context -4), while the
+existing Hub HWND was PerMonitorV1 (-3); both were at 96 DPI. The current broker
+manifest is PerMonitorV1, so direct real-LINE attachment is refused. Candidate
+metadata alone does not classify authentication versus normal main windows.
+
+Microsoft's [SetParent documentation](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setparent)
+warns that cross-process DPI mismatch can reset the child process. Its
+[mixed-hosting API](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setthreaddpihostingbehavior)
+is a possible alternative using a PMv2 broker root/pane, but preserving a PMv1
+Hub and PMv2 child simultaneously must first be established with owned windows.
+Do not reset LINE awareness, weaken equality checks for LINE or attach it based
+on this read-only probe. No real-LINE attachment was attempted.

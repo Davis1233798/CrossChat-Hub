@@ -20,4 +20,8 @@ $hubBrokerExecutable = Join-Path $outputDir 'HubBroker.exe'
 $hubBrokerManifest = Join-Path $PSScriptRoot 'HubBroker.manifest'
 & $compiler /nologo /target:winexe /platform:x64 /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll "/win32manifest:$hubBrokerManifest" "/out:$hubBrokerExecutable" $hubBrokerSource
 if ($LASTEXITCODE -ne 0) { throw 'Hub broker compilation failed' }
+$probeSource = Join-Path $PSScriptRoot 'CompatibilityProbe.cs'
+$probeExecutable = Join-Path $outputDir 'CompatibilityProbe.exe'
+& $compiler /nologo /target:exe /platform:x64 /reference:System.Web.Extensions.dll "/out:$probeExecutable" $probeSource
+if ($LASTEXITCODE -ne 0) { throw 'Read-only compatibility probe compilation failed' }
 Write-Output (Join-Path $outputDir 'NativeHost.exe')
