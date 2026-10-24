@@ -243,3 +243,21 @@ is a possible alternative using a PMv2 broker root/pane, but preserving a PMv1
 Hub and PMv2 child simultaneously must first be established with owned windows.
 Do not reset LINE awareness, weaken equality checks for LINE or attach it based
 on this read-only probe. No real-LINE attachment was attempted.
+
+The owned-window `CROSSCHAT_BROKER_DPI=mixed-v2` mode uses a separate fixed
+`HubBrokerMixed.exe` compiled with a PMv2 manifest; default `strict-v1` remains
+unchanged. On Windows 10 1803 or later, MIXED hosting is enabled before root/pane
+HWND creation, read back as 1 on both, then the original thread behavior is
+restored. Unsupported API/INVALID return refuses startup. Microsoft documents
+that a system/unaware parent cannot host per-monitor children; this experiment
+instead uses a PMv2 parent.
+
+Actual isolated Hub run on 2026-10-24: PMv1 Hub remained context -3 before/after
+parenting, and owned PMv2 fixture remained -4. Attachment, shared root, resize,
+controller exit, surviving fixture and normal restoration/closure passed.
+`dpiAwarenessEqual=false` remains explicit because this mode deliberately uses
+documented mixed hosting, not process-awareness reset. A separate after-resize
+failure preserved the failure result and verified reverse rollback while Hub
+was alive: Hub remained -3 after detach, fixture remained -4, root/pane remained
+-4. No broker processes remained. This establishes an owned-window DPI candidate,
+not real-LINE embedding, mixed-monitor behavior or broker-hard-crash safety.

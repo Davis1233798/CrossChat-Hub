@@ -20,11 +20,13 @@ function configureBrokerStudy(app) {
   if (!['manual', 'normal', 'crash'].includes(mode)) throw new Error('Invalid broker test mode');
   const injection = process.env.CROSSCHAT_BROKER_FAIL_AT || 'none';
   if (!['none', 'after-hub-parent', 'after-fixture-parent', 'after-resize', 'stdio-eof'].includes(injection)) throw new Error('Invalid broker failure injection');
-  const binary = path.join(__dirname, '..', 'build', 'bin', 'native-host', 'HubBroker.exe');
+  const dpiMode = process.env.CROSSCHAT_BROKER_DPI || 'strict-v1';
+  if (!['strict-v1', 'mixed-v2'].includes(dpiMode)) throw new Error('Invalid broker DPI study mode');
+  const binary = path.join(__dirname, '..', 'build', 'bin', 'native-host', dpiMode === 'mixed-v2' ? 'HubBrokerMixed.exe' : 'HubBroker.exe');
   if (!fs.existsSync(binary) || !fs.statSync(binary).isFile()) throw new Error('Build the fixed HubBroker.exe before enabling broker study');
   let server, origin, sidecar, attached = false, shuttingDown = false, failed = false;
   const urlPath = '/' + crypto.randomBytes(20).toString('hex');
-  const evidence = { profile, resultPath, mode, injection, controllerPid: process.pid };
+  const evidence = { profile, resultPath, mode, injection, dpiMode, controllerPid: process.pid };
   fs.writeFileSync(path.join(profile, 'study.json'), JSON.stringify(evidence));
   console.log('CROSSCHAT_BROKER_STUDY ' + JSON.stringify(evidence));
   function write(type, fields = {}) {
@@ -52,7 +54,7 @@ function configureBrokerStudy(app) {
     async attach(window, quit) {
       // Independent process group: controller console teardown must not kill
       // the root-owning broker before it can restore its synthetic child.
-      sidecar = spawn(binary, [String(process.pid), nonce, resultPath, mode, injection], { stdio: ['pipe', 'pipe', 'pipe'], detached: true, windowsHide: false });
+      sidecar = spawn(binary, [String(process.pid), nonce, resultPath, mode, injection, dpiMode], { stdio: ['pipe', 'pipe', 'pipe'], detached: true, windowsHide: false });
       sidecar.stderr.on('data', bytes => console.error('Native broker:', bytes.toString().slice(0, 512)));
       const handle = window.getNativeWindowHandle();
       const hwnd = (handle.length === 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE())).toString();

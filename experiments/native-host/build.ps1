@@ -20,6 +20,10 @@ $hubBrokerExecutable = Join-Path $outputDir 'HubBroker.exe'
 $hubBrokerManifest = Join-Path $PSScriptRoot 'HubBroker.manifest'
 & $compiler /nologo /target:winexe /platform:x64 /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll "/win32manifest:$hubBrokerManifest" "/out:$hubBrokerExecutable" $hubBrokerSource
 if ($LASTEXITCODE -ne 0) { throw 'Hub broker compilation failed' }
+$mixedExecutable = Join-Path $outputDir 'HubBrokerMixed.exe'
+$mixedManifest = Join-Path $PSScriptRoot 'HubBrokerMixed.manifest'
+& $compiler /nologo /target:winexe /platform:x64 /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll "/win32manifest:$mixedManifest" "/out:$mixedExecutable" $hubBrokerSource
+if ($LASTEXITCODE -ne 0) { throw 'Mixed-DPI broker study compilation failed' }
 $probeSource = Join-Path $PSScriptRoot 'CompatibilityProbe.cs'
 $probeExecutable = Join-Path $outputDir 'CompatibilityProbe.exe'
 & $compiler /nologo /target:exe /platform:x64 /reference:System.Web.Extensions.dll "/out:$probeExecutable" $probeSource

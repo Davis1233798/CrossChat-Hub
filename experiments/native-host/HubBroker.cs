@@ -29,6 +29,8 @@ internal static class HubBroker {
   [DllImport("user32.dll")] static extern bool AreDpiAwarenessContextsEqual(IntPtr a, IntPtr b);
   [DllImport("user32.dll")] static extern IntPtr SetFocus(IntPtr window);
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window,int command);
+  [DllImport("user32.dll")] static extern int SetThreadDpiHostingBehavior(int behavior);
+  [DllImport("user32.dll")] static extern int GetWindowDpiHostingBehavior(IntPtr window);
   [StructLayout(LayoutKind.Sequential)] struct Placement { public int Length, Flags, ShowCmd; public Point Min, Max; public Rect Normal; }
   [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
   static JavaScriptSerializer json=new JavaScriptSerializer { MaxJsonLength=4096, RecursionLimit=8 };
@@ -40,6 +42,8 @@ internal static class HubBroker {
   static Form root; static Panel pane; static Label status;
   static bool attached, finish, closingRequested, resized, rootSurvived, chatSurvived, chatRestored, chatClosed, controllerExited, dpiEqual;
   static string error;
+  static bool mixed; static int previousHosting=-1, rootHosting=-1,paneHosting=-1;
+  static string hubDpiBefore,hubDpiAfter,fixtureDpiBefore,fixtureDpiAfter,hubDpiRestored,fixtureDpiRestored;
   static void Trace(string stage) { File.AppendAllText(resultPath+".trace",DateTime.UtcNow.ToString("O")+" "+stage+Environment.NewLine); }
   static void Emit(string type, params object[] fields) {
     var record=new Dictionary<string,object> { {"v",1},{"nonce",nonce},{"type",type} };
@@ -63,7 +67,8 @@ internal static class HubBroker {
     if(!chatSurvived)return;
     SetParent(chat,chatParent); SetStyle(chat,-16,chatStyle); SetWindowPlacement(chat,ref chatPlacement);
     var actual=PlacementOf(chat);
-    chatRestored=GetParent(chat)==chatParent && GetStyle(chat,-16)==chatStyle && actual.Normal.Equals(chatPlacement.Normal) && actual.ShowCmd==chatPlacement.ShowCmd && IsWindowVisible(chat);
+    fixtureDpiRestored=DpiName(chat);
+    chatRestored=GetParent(chat)==chatParent && GetStyle(chat,-16)==chatStyle && actual.Normal.Equals(chatPlacement.Normal) && actual.ShowCmd==chatPlacement.ShowCmd && IsWindowVisible(chat) && fixtureDpiRestored==fixtureDpiBefore;
     if(chatRestored) { fixture.CloseMainWindow(); chatClosed=fixture.WaitForExit(5000); }
   }
   static bool RestoreHub() {
@@ -73,8 +78,9 @@ internal static class HubBroker {
     // saved visibility separately so rollback does not unexpectedly show it.
     ShowWindow(hub,hubVisible ? 4 : 0); SetStyle(hub,-16,hubStyle);
     var actual=PlacementOf(hub);
+    hubDpiRestored=DpiName(hub);
     Trace("Hub rollback parent="+(GetParent(hub)==hubParent)+" style="+(GetStyle(hub,-16)==hubStyle)+" rect="+actual.Normal.Equals(hubPlacement.Normal)+" show="+actual.ShowCmd+"/"+hubPlacement.ShowCmd+" visible="+IsWindowVisible(hub)+"/"+hubVisible);
-    return GetParent(hub)==hubParent && GetStyle(hub,-16)==hubStyle && actual.Normal.Equals(hubPlacement.Normal) && actual.ShowCmd==hubPlacement.ShowCmd && IsWindowVisible(hub)==hubVisible;
+    return GetParent(hub)==hubParent && GetStyle(hub,-16)==hubStyle && actual.Normal.Equals(hubPlacement.Normal) && actual.ShowCmd==hubPlacement.ShowCmd && IsWindowVisible(hub)==hubVisible && hubDpiRestored==hubDpiBefore;
   }
   static void Inject(string point) { if(injection==point)throw new Exception("Injected failure: "+point); }
   static void Rollback() {
@@ -103,6 +109,9 @@ internal static class HubBroker {
       ,{"injection",injection},{"hubChanged",hubChanged},{"fixtureChanged",chatChanged},{"rollbackAttempted",rollbackAttempted},
       {"hubRestoreVerified",hubRestored},{"hubAliveAtRollback",hubRestored&&Alive(controller,controllerStart,hub)},
       {"rollbackVerified",rollbackVerified},{"rollbackOrder",rollbackOrder},{"success",error==null&&finish&&chatRestored&&chatClosed}
+      ,{"mixedHosting",mixed},{"previousThreadHosting",previousHosting},{"rootHosting",rootHosting},{"paneHosting",paneHosting},
+      {"hubDpiBefore",hubDpiBefore},{"hubDpiAfter",hubDpiAfter},{"fixtureDpiBefore",fixtureDpiBefore},{"fixtureDpiAfter",fixtureDpiAfter},{"hubDpiRestored",hubDpiRestored},{"fixtureDpiRestored",fixtureDpiRestored},
+      {"rootDpi",DpiName(root.Handle)},{"paneDpi",DpiName(pane.Handle)}
     }));
   }
   static void Fail(string message) {
@@ -130,14 +139,23 @@ internal static class HubBroker {
       long raw; if(!long.TryParse((string)d["hwnd"],out raw)||raw<=0)throw new Exception("Invalid HWND"); hub=new IntPtr(raw);
       if(!Alive(controller,controllerStart,hub)||GetParent(hub)!=IntPtr.Zero)throw new Exception("Hub HWND ownership/root mismatch");
       dpiEqual=AreDpiAwarenessContextsEqual(GetWindowDpiAwarenessContext(hub),GetWindowDpiAwarenessContext(root.Handle));
-      if(!dpiEqual)throw new Exception("DPI awareness differs (Hub="+DpiName(hub)+", broker="+DpiName(root.Handle)+"); embedding refused");
+      hubDpiBefore=DpiName(hub);
+      if(mixed) {
+        if(hubDpiBefore!="context-3"||DpiName(root.Handle)!="context-4"||DpiName(pane.Handle)!="context-4"||rootHosting!=1||paneHosting!=1)throw new Exception("Mixed owned-study DPI prerequisites failed");
+      } else if(!dpiEqual)throw new Exception("DPI awareness differs (Hub="+DpiName(hub)+", broker="+DpiName(root.Handle)+"); embedding refused");
       hubParent=GetParent(hub); hubStyle=GetStyle(hub,-16);hubPlacement=PlacementOf(hub);hubVisible=IsWindowVisible(hub);
       fixture=Process.Start(new ProcessStartInfo(Application.ExecutablePath,"--fixture "+nonce) { UseShellExecute=false }); fixtureStart=fixture.StartTime.ToUniversalTime().Ticks;
       for(int i=0;i<100;i++) { fixture.Refresh(); chat=fixture.MainWindowHandle; if(chat!=IntPtr.Zero)break; Thread.Sleep(50); }
       if(!Alive(fixture,fixtureStart,chat))throw new Exception("Owned fixture has no HWND");
       chatParent=GetParent(chat); chatStyle=GetStyle(chat,-16); chatPlacement=PlacementOf(chat);
+      fixtureDpiBefore=DpiName(chat);
+      if(mixed&&fixtureDpiBefore!="context-4")throw new Exception("Owned fixture is not PMv2");
       hubChanged=true; SetStyle(hub,-16,new IntPtr((hubStyle.ToInt64()|0x40000000L)&~0x80000000L)); SetParent(hub,pane.Handle); Inject("after-hub-parent");
+      hubDpiAfter=DpiName(hub);
+      if(hubDpiAfter!=hubDpiBefore)throw new Exception("Hub DPI changed during parenting");
       chatChanged=true; SetStyle(chat,-16,new IntPtr((chatStyle.ToInt64()|0x40000000L)&~0x80000000L)); SetParent(chat,pane.Handle); Inject("after-fixture-parent");
+      fixtureDpiAfter=DpiName(chat);
+      if(fixtureDpiAfter!=fixtureDpiBefore)throw new Exception("Fixture DPI changed during parenting");
       if(GetParent(hub)!=pane.Handle || GetParent(chat)!=pane.Handle || GetAncestor(hub,2)!=root.Handle || GetAncestor(chat,2)!=root.Handle)throw new Exception("Shared broker root verification failed");
       attached=true; Layout(); Inject("after-resize"); status.Text="Isolated actual Hub + owned synthetic chat. No LINE account attached.";
       Trace("attached root="+root.Handle+" brokerPid="+Process.GetCurrentProcess().Id+" fixturePid="+fixture.Id); Emit("attached","rootHwnd",root.Handle.ToInt64().ToString()); Save();
@@ -156,8 +174,10 @@ internal static class HubBroker {
       Application.Run(new Form { Text="Owned synthetic native chat",Width=360,Height=450,Controls={ new Label { Text="Native chat fixture\n\nNo LINE or Chrome process.\n\nThis HWND is a sibling of the actual Hub.\nBroker owns the shared top-level root.",Dock=DockStyle.Fill,Padding=new Padding(20),Font=new Font("Segoe UI",12) } } }); return 0;
     }
     int pid;
-    if(args.Length!=5 || !int.TryParse(args[0],out pid) || pid<=0 || !Regex.IsMatch(args[1],"^[a-f0-9]{48}$") || !Path.IsPathRooted(args[2]) || Path.GetFileName(args[2])!="broker-result.json" || !Path.GetFileName(Path.GetDirectoryName(args[2])).StartsWith("crosschat-broker-hub-") || (args[3]!="normal"&&args[3]!="crash"&&args[3]!="manual") || !Regex.IsMatch(args[4],"^(none|after-hub-parent|after-fixture-parent|after-resize|stdio-eof)$"))return 2;
+    if(args.Length!=6 || !int.TryParse(args[0],out pid) || pid<=0 || !Regex.IsMatch(args[1],"^[a-f0-9]{48}$") || !Path.IsPathRooted(args[2]) || Path.GetFileName(args[2])!="broker-result.json" || !Path.GetFileName(Path.GetDirectoryName(args[2])).StartsWith("crosschat-broker-hub-") || (args[3]!="normal"&&args[3]!="crash"&&args[3]!="manual") || !Regex.IsMatch(args[4],"^(none|after-hub-parent|after-fixture-parent|after-resize|stdio-eof)$") || (args[5]!="strict-v1"&&args[5]!="mixed-v2"))return 2;
     nonce=args[1];resultPath=args[2];mode=args[3];injection=args[4]; controller=Process.GetProcessById(pid); controllerStart=controller.StartTime.ToUniversalTime().Ticks;
+    mixed=args[5]=="mixed-v2";
+    if(mixed) { try { previousHosting=SetThreadDpiHostingBehavior(1); }catch(EntryPointNotFoundException){return 3;} if(previousHosting==-1)return 3; }
     AppDomain.CurrentDomain.UnhandledException+=delegate(object s,UnhandledExceptionEventArgs e){Trace("unhandled "+e.ExceptionObject);};
     Trace("start brokerPid="+Process.GetCurrentProcess().Id+" controller="+pid);
     root=new Form { Text="CrossChat broker — isolated actual Hub study",Width=1660,Height=900,MinimumSize=new Size(1400,700),StartPosition=FormStartPosition.CenterScreen };
@@ -167,6 +187,10 @@ internal static class HubBroker {
     var focusChat=new Button { Text="Focus fixture",Width=120 }; focusChat.Click+=delegate { if(Alive(fixture,fixtureStart,chat))SetFocus(chat); };
     toolbar.Controls.Add(focusHub);toolbar.Controls.Add(focusChat);
     pane=new Panel { Dock=DockStyle.Fill }; root.Controls.Add(pane);root.Controls.Add(status);root.Controls.Add(toolbar);
+    // Force creation of both native parent HWNDs while MIXED is active, then
+    // restore the thread setting. Existing windows are never retrofitted.
+    IntPtr rootHandle=root.Handle,paneHandle=pane.Handle;
+    if(mixed) { rootHosting=GetWindowDpiHostingBehavior(rootHandle);paneHosting=GetWindowDpiHostingBehavior(paneHandle);SetThreadDpiHostingBehavior(previousHosting); }
     root.Resize+=delegate { try { Layout(); }catch(Exception ex){Fail(ex.Message);} };
     root.FormClosing+=delegate(object sender,FormClosingEventArgs e) {
       if(error!=null && !rollbackVerified && ((IsWindow(hub)&&GetAncestor(hub,2)==root.Handle)||(IsWindow(chat)&&GetAncestor(chat,2)==root.Handle))) { e.Cancel=true; return; }
