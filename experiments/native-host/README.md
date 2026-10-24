@@ -296,3 +296,25 @@ alongside `resizeVerified=false`; it has not been altered. Output now separates
 successful restoration cycle from concealing failed layout. This is not final
 LINE-tab integration or verified messaging. Broker hard termination can still
 destroy an attached third-party child HWND and remains unresolved.
+
+The layout follow-up used **only owned PMv2 fixtures**, not a second LINE attach.
+A fixture minimum width of 364 reproduced requested outer width 360 -> actual
+364, with a 348-pixel client area. Screen bounds mapped into the parent client
+space confirmed the 4-pixel overflow; it was not a client/outer-width comparison.
+This demonstrates one possible cause (minimum tracking) and does not prove
+LINE uses that same constraint.
+
+Layout now reads actual native bounds and reallocates side-by-side widths, with
+at most three attempts. It accepts only full-height, adjacent outer rectangles
+inside the pane; no clipping or fixed 4-pixel compensation is used. Main supplies
+its own BrowserWindow minimum DIP dimensions multiplied by display scale;
+broker validates bounded integers and refuses any layout that would squeeze the
+Hub/composer below that minimum. No LINE styles were changed for this fix.
+
+`node experiments/native-host/layout-smoke.mjs` passed on Windows: owned 364-pixel
+fixture was reallocated to 1280 + 364 = 1644, then 1360 + 364 = 1724 after resize,
+and restored/closed normally. An owned 1600-pixel minimum could not coexist with
+the Hub minimum, so the attempt failed and rolled both live windows back before
+controller exit code 1. No processes remained. The script explicitly disables
+the real-LINE flag. The actual LINE 4-pixel issue, visual embedding and mixed-DPI
+monitor changes remain unverified by these synthetic results.

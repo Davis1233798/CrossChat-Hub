@@ -65,10 +65,16 @@ function configureBrokerStudy(app) {
     async attach(window, quit) {
       // Independent process group: controller console teardown must not kill
       // the root-owning broker before it can restore its synthetic child.
-      sidecar = spawn(binary, [String(process.pid), nonce, resultPath, mode, injection, dpiMode], { stdio: ['pipe', 'pipe', 'pipe'], detached: true, windowsHide: false });
-      sidecar.stderr.on('data', bytes => console.error('Native broker:', bytes.toString().slice(0, 512)));
       const handle = window.getNativeWindowHandle();
       const hwnd = (handle.length === 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE())).toString();
+      // Main-owned BrowserWindow minimum in DIP -> native broker pixels. Never
+      // accept layout minima from the renderer or a remote messaging page.
+      const minimum = window.getMinimumSize();
+      const scale = require('electron').screen.getDisplayMatching(window.getBounds()).scaleFactor;
+      const hubMinimum = { width: Math.ceil(minimum[0] * scale), height: Math.ceil(minimum[1] * scale) };
+      if (!Object.values(hubMinimum).every(n => Number.isSafeInteger(n) && n > 0 && n <= 8192)) throw new Error('Invalid native Hub minimum dimensions');
+      sidecar = spawn(binary, [String(process.pid), nonce, resultPath, mode, injection, dpiMode], { stdio: ['pipe', 'pipe', 'pipe'], detached: true, windowsHide: false });
+      sidecar.stderr.on('data', bytes => console.error('Native broker:', bytes.toString().slice(0, 512)));
       let pending = '', ready = false;
       const done = new Promise((resolve, reject) => {
         let settled = false;
@@ -97,7 +103,7 @@ function configureBrokerStudy(app) {
               if (line.length > 4096) throw new Error('Broker line too long');
               const msg = JSON.parse(line);
               if (msg.v !== 1 || msg.nonce !== nonce) throw new Error('Broker handshake identity mismatch');
-              if (msg.type === 'ready' && !ready) { ready = true; write('attach', { pid: process.pid, hwnd, startTicks: msg.startTicks, ...(lineStudy ? { lineWitness } : {}) }); }
+              if (msg.type === 'ready' && !ready) { ready = true; write('attach', { pid: process.pid, hwnd, startTicks: msg.startTicks, hubMinimum, ...(lineStudy ? { lineWitness } : {}) }); }
               else if (msg.type === 'attached' && ready && !attached) {
                 attached = true; clearTimeout(timer); window.show(); settled = true; resolve(msg);
                 if (lineStudy) setTimeout(() => write('resize-check'), 1000);

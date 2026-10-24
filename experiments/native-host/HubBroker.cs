@@ -25,6 +25,8 @@ internal static class HubBroker {
   [DllImport("user32.dll")] static extern bool MoveWindow(IntPtr window, int x, int y, int width, int height, bool repaint);
   [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window, out Rect rect);
   [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out Rect rect);
+  [DllImport("user32.dll")] static extern int MapWindowPoints(IntPtr from,IntPtr to,ref Rect points,uint count);
+  [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr window,ref Point point);
   [DllImport("user32.dll")] static extern IntPtr GetWindowDpiAwarenessContext(IntPtr window);
   [DllImport("user32.dll")] static extern bool AreDpiAwarenessContextsEqual(IntPtr a, IntPtr b);
   [DllImport("user32.dll")] static extern IntPtr SetFocus(IntPtr window);
@@ -44,6 +46,11 @@ internal static class HubBroker {
   static string error;
   static bool mixed; static int previousHosting=-1, rootHosting=-1,paneHosting=-1;
   static string hubDpiBefore,hubDpiAfter,fixtureDpiBefore,fixtureDpiAfter,hubDpiRestored,fixtureDpiRestored;
+  static readonly List<object> layoutObservations=new List<object>();
+  static bool layoutAdapted;
+  static int hubMinimumWidth,hubMinimumHeight;
+  static Rect LocalBounds(IntPtr window) { Rect rect;if(!GetWindowRect(window,out rect))throw new Exception("Cannot read child bounds");MapWindowPoints(IntPtr.Zero,pane.Handle,ref rect,2);return rect; }
+  static object BoundsRecord(Rect r) {return new { left=r.Left,top=r.Top,width=r.Right-r.Left,height=r.Bottom-r.Top };}
 #if LINE_STUDY
   static readonly Stopwatch lineDeadline=new Stopwatch();
   static Rect lineOriginalBounds;
@@ -77,8 +84,25 @@ internal static class HubBroker {
     // GetClientRect and MoveWindow both use the native physical coordinate
     // space of this PerMonitor process. Electron handles its own child DIP UI.
     Rect r; GetClientRect(pane.Handle,out r); int width=r.Right-r.Left,height=r.Bottom-r.Top;
-    int left=Math.Max(1,width-360);
-    if(!MoveWindow(hub,0,0,left,height,true)||!MoveWindow(chat,left,0,Math.Max(1,width-left),height,true))throw new Exception("Native layout failed");
+    if(height<hubMinimumHeight)throw new Exception("Native pane is shorter than Hub minimum height");
+    int chatWidth=360;
+    for(int attempt=0;attempt<3;attempt++) {
+      int left=width-chatWidth;
+      if(left<hubMinimumWidth||chatWidth<1)throw new Exception("Native child minimum dimensions exceed available pane");
+      if(!MoveWindow(hub,0,0,left,height,true)||!MoveWindow(chat,left,0,chatWidth,height,true))throw new Exception("Native layout failed");
+      Rect observed=LocalBounds(chat),h=LocalBounds(hub),client;GetClientRect(chat,out client);
+      Point origin=new Point(0,0);ClientToScreen(pane.Handle,ref origin);
+      if(layoutObservations.Count>=16)layoutObservations.RemoveAt(0);
+      layoutObservations.Add(new { attempt=attempt,requestedChatWidth=chatWidth,paneWidth=width,paneHeight=height,paneScreenX=origin.X,paneScreenY=origin.Y,hub=BoundsRecord(h),chat=BoundsRecord(observed),chatClient=BoundsRecord(client),chatStyle=GetStyle(chat,-16).ToInt64().ToString("x"),hubContext=DpiName(hub),chatContext=DpiName(chat) });
+      // Verify outer rectangles in ONE parent-client coordinate space. No
+      // clipped overflow is accepted merely because Windows hides it.
+      if(h.Left==0&&h.Top==0&&observed.Top==0&&h.Right==observed.Left&&observed.Right==width&&h.Bottom==height&&observed.Bottom==height) { if(attempt>0)layoutAdapted=true;return; }
+      int actualChat=observed.Right-observed.Left,actualHub=h.Right-h.Left;
+      if(actualHub>left && actualHub+actualChat>width)throw new Exception("Native child minimum widths cannot fit side by side");
+      if(actualChat!=chatWidth)chatWidth=actualChat;
+      else if(actualHub>left)chatWidth=width-actualHub;
+    }
+    throw new Exception("Native layout did not converge within three read-back attempts");
   }
   static void RestoreFixture() {
     chatSurvived=Alive(fixture,fixtureStart,chat);
@@ -136,19 +160,21 @@ internal static class HubBroker {
     Save(); if(mode!="manual" || closingRequested)root.Close();
   }
   static void Save() {
-    File.WriteAllText(resultPath,json.Serialize(new Dictionary<string,object> {
+    File.WriteAllText(resultPath,new JavaScriptSerializer { MaxJsonLength=65536,RecursionLimit=8 }.Serialize(new Dictionary<string,object> {
       {"attached",attached},{"sameRootAtAttach",attached},{"dpiAwarenessEqual",dpiEqual},{"resizeVerified",resized},
       {"controllerExited",controllerExited},{"brokerRootSurvived",rootSurvived},{"fixtureHwndSurvived",chatSurvived},
       {"fixtureRestoreVerified",chatRestored},{"fixtureNormallyClosed",chatClosed},{"error",error}
       ,{"injection",injection},{"hubChanged",hubChanged},{"fixtureChanged",chatChanged},{"rollbackAttempted",rollbackAttempted},
       {"hubRestoreVerified",hubRestored},{"hubAliveAtRollback",hubRestored&&Alive(controller,controllerStart,hub)},
+      {"layoutObservations",layoutObservations},{"layoutAdapted",layoutAdapted},
+      {"hubMinimumWidth",hubMinimumWidth},{"hubMinimumHeight",hubMinimumHeight},
       {"rollbackVerified",rollbackVerified},{"rollbackOrder",rollbackOrder},
 #if LINE_STUDY
       {"normalCycleCompleted",error==null&&finish&&chatRestored&&LineAlive},
       {"layoutVerified",resized},{"overallAccepted",error==null&&finish&&chatRestored&&LineAlive&&resized},
       {"realLineStudy",true},{"lineProcessAliveAfterRestore",LineAlive},{"lineElapsedMs",lineDeadline.ElapsedMilliseconds}
 #else
-      {"success",error==null&&finish&&chatRestored&&chatClosed}
+      {"success",error==null&&finish&&chatRestored&&chatClosed&&resized}
 #endif
       ,{"mixedHosting",mixed},{"previousThreadHosting",previousHosting},{"rootHosting",rootHosting},{"paneHosting",paneHosting},
       {"hubDpiBefore",hubDpiBefore},{"hubDpiAfter",hubDpiAfter},{"fixtureDpiBefore",fixtureDpiBefore},{"fixtureDpiAfter",fixtureDpiAfter},{"hubDpiRestored",hubDpiRestored},{"fixtureDpiRestored",fixtureDpiRestored},
@@ -174,9 +200,9 @@ internal static class HubBroker {
     var d=json.Deserialize<Dictionary<string,object>>(line);
     if(d==null || d.Count>
 #if LINE_STUDY
-      7
+      8
 #else
-      6
+      7
 #endif
       || !d.ContainsKey("v") || Convert.ToInt32(d["v"])!=1 || !d.ContainsKey("nonce") || (string)d["nonce"]!=nonce || !d.ContainsKey("type"))throw new Exception("Invalid broker envelope");
     string type=(string)d["type"];
@@ -184,11 +210,15 @@ internal static class HubBroker {
     if(type=="attach" && !attached) {
       if(d.Count!=
 #if LINE_STUDY
-        7
+        8
 #else
-        6
+        7
 #endif
         || Convert.ToInt32(d["pid"])!=controller.Id || (string)d["startTicks"]!=controllerStart.ToString() || controller.HasExited || controller.StartTime.ToUniversalTime().Ticks!=controllerStart)throw new Exception("Controller identity mismatch");
+      var minima=d["hubMinimum"] as Dictionary<string,object>;
+      if(minima==null||minima.Count!=2||!minima.ContainsKey("width")||!minima.ContainsKey("height")||!(minima["width"] is int)||!(minima["height"] is int))throw new Exception("Invalid main-owned Hub minima");
+      hubMinimumWidth=(int)minima["width"];hubMinimumHeight=(int)minima["height"];
+      if(hubMinimumWidth<1||hubMinimumWidth>8192||hubMinimumHeight<1||hubMinimumHeight>8192)throw new Exception("Hub minima outside bounded range");
       long raw; if(!long.TryParse((string)d["hwnd"],out raw)||raw<=0)throw new Exception("Invalid HWND"); hub=new IntPtr(raw);
       if(!Alive(controller,controllerStart,hub)||GetParent(hub)!=IntPtr.Zero)throw new Exception("Hub HWND ownership/root mismatch");
       dpiEqual=AreDpiAwarenessContextsEqual(GetWindowDpiAwarenessContext(hub),GetWindowDpiAwarenessContext(root.Handle));
@@ -242,7 +272,9 @@ internal static class HubBroker {
   [STAThread] static int Main(string[] args) {
     Application.EnableVisualStyles();
     if(args.Length==2 && args[0]=="--fixture" && Regex.IsMatch(args[1],"^[a-f0-9]{48}$")) {
-      Application.Run(new Form { Text="Owned synthetic native chat",Width=360,Height=450,Controls={ new Label { Text="Native chat fixture\n\nNo LINE or Chrome process.\n\nThis HWND is a sibling of the actual Hub.\nBroker owns the shared top-level root.",Dock=DockStyle.Fill,Padding=new Padding(20),Font=new Font("Segoe UI",12) } } }); return 0;
+      int minimumWidth=0;string minimum=Environment.GetEnvironmentVariable("CROSSCHAT_BROKER_OWNED_MIN_WIDTH");
+      if(minimum!=null&&(!int.TryParse(minimum,out minimumWidth)||minimumWidth<128||minimumWidth>1600))return 2;
+      Application.Run(new Form { Text="Owned synthetic native chat",Width=360,Height=450,MinimumSize=new Size(minimumWidth,0),Controls={ new Label { Text="Native chat fixture\n\nNo LINE or Chrome process.\n\nThis HWND is a sibling of the actual Hub.\nBroker owns the shared top-level root.",Dock=DockStyle.Fill,Padding=new Padding(20),Font=new Font("Segoe UI",12) } } }); return 0;
     }
     int pid;
     if(args.Length!=6 || !int.TryParse(args[0],out pid) || pid<=0 || !Regex.IsMatch(args[1],"^[a-f0-9]{48}$") || !Path.IsPathRooted(args[2]) || Path.GetFileName(args[2])!="broker-result.json" || !Path.GetFileName(Path.GetDirectoryName(args[2])).StartsWith("crosschat-broker-hub-") || (args[3]!="normal"&&args[3]!="crash"&&args[3]!="manual") || !Regex.IsMatch(args[4],"^(none|after-hub-parent|after-fixture-parent|after-resize|stdio-eof)$") || (args[5]!="strict-v1"&&args[5]!="mixed-v2"))return 2;
