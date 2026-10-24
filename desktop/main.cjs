@@ -334,6 +334,7 @@ if (singleInstance) {
       unregister: accelerator => smokeHooks ? smokeHooks.unregisterShortcut(accelerator) : globalShortcut.unregister(accelerator),
       isBound: async () => Boolean(await lineBinding.witnessFor('line')),
       capture: input => drafts.captureObservedSelection(input),
+      discard: input => drafts.revokeSelection(input),
       onResult: result => { if (!closing && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('crosschat:selection-observed', result); },
     });
     cancelSelectionArm = () => selectionArming.close();

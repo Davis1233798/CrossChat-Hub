@@ -8,7 +8,8 @@ import { createForwardingDrafts } from '../desktop/forwarding-drafts.mjs';
 test('preload IPC traverses main-frame guard into private draft service', async () => {
   const handlers = new Map(), url = 'file:///owned/shell.html';
   const frame = { url }, contents = { mainFrame: frame }, window = { webContents: contents, isDestroyed: () => false };
-  const arming = { arm: async input => ({ status: 'armed', armId: 'opaque' }), cancel: input => ({ status: 'cancelled' }), close() {} };
+  const arming = { arm: async input => ({ status: 'prepared', armId: 'opaque' }), activate: input => ({ status: 'armed', armId: input.armId }),
+    acknowledge: () => ({ status: 'accepted' }), cancel: input => ({ status: 'cancelled' }), close() {} };
   registerForwardingIpc({ handle: (key, fn) => handlers.set(key, fn) }, () => window, url, createForwardingDrafts(), null, arming);
   let exposed;
   const event = { sender: contents, senderFrame: frame };
@@ -31,14 +32,16 @@ test('preload IPC traverses main-frame guard into private draft service', async 
   assert.equal((await exposed.captureSelection({ text: 'x', platform: 'line', chatName: '群', selectionId: 'forged' })).status, 'rejected');
   assert.equal((await exposed.prepareSelection({ ...ref, routeText: '@slack:頻道 偷換內容' })).status, 'rejected');
   assert.equal((await exposed.revokeSelection(ref)).status, 'revoked');
-  assert.equal((await exposed.armSelectionCapture({ platform: 'line', chatName: '合成來源' })).status, 'armed');
+  assert.equal((await exposed.armSelectionCapture({ platform: 'line', chatName: '合成來源' })).status, 'prepared');
+  assert.equal((await exposed.activateSelectionCapture({ armId: 'opaque' })).status, 'armed');
   assert.equal((await exposed.cancelSelectionCapture({ armId: 'opaque' })).status, 'cancelled');
+  assert.equal((await exposed.acknowledgeSelectionCapture({ armId: 'opaque', selectionId: 'sel', captureRevision: 1 })).status, 'accepted');
   assert.equal((await exposed.executeDraft(forward.draftId, forward.revision)).status, 'rejected');
   for (const bad of [
     { sender: {}, senderFrame: frame }, // remote view or popup
     { sender: contents, senderFrame: { url } }, // iframe, including same-origin
     { sender: contents, senderFrame: null },
-  ]) for (const channel of ['draft-prepare', 'selection-capture', 'selection-prepare', 'selection-revoke', 'selection-arm', 'selection-arm-cancel']) assert.throws(() => handlers.get(`crosschat:${channel}`)(bad, { text: 'x' }), /Untrusted/);
+  ]) for (const channel of ['draft-prepare', 'selection-capture', 'selection-prepare', 'selection-revoke', 'selection-arm', 'selection-arm-activate', 'selection-arm-cancel', 'selection-arm-ack']) assert.throws(() => handlers.get(`crosschat:${channel}`)(bad, { text: 'x' }), /Untrusted/);
   frame.url = 'https://example.com/';
   assert.throws(() => handlers.get('crosschat:draft-prepare')(event, { text: 'x' }), /Untrusted/);
 });

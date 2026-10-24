@@ -168,7 +168,7 @@
     selectionArm.disabled = true;
     try {
       const result = await window.crosschatDesktop.armSelectionCapture({ platform: 'line', chatName: sourceChat.value });
-      if (result.status === 'armed') {
+      if (result.status === 'prepared') {
         if (requestVersion !== editVersion || mode.value !== 'selection' || sourcePlatform.value !== 'line') {
           void window.crosschatDesktop.cancelSelectionCapture({ armId: result.armId }).catch(() => {});
           return;
@@ -177,6 +177,11 @@
         selectionArm.hidden = true; selectionCancel.hidden = false;
         selectionHint.textContent = '30 秒內切回 LINE，選取單則文字後按 Ctrl+Shift+Alt+S。尚未讀取或發送。';
         composeStatus.textContent = '等待你在已綁定的 LINE 視窗選取文字並按快捷鍵。';
+        const activated = await window.crosschatDesktop.activateSelectionCapture({ armId: result.armId });
+        if (activated.status !== 'armed' && armedSelection?.armId === result.armId) {
+          cancelArmedSelection();
+          composeStatus.textContent = activated.reason === 'shortcut-unavailable' ? '快捷鍵正在被其他程式使用。請關閉該程式後重試。' : '讀取準備已取消，請重試。';
+        }
       } else if (result.reason === 'shortcut-unavailable') composeStatus.textContent = '快捷鍵正在被其他程式使用。請關閉該程式後重試。';
       else if (result.reason === 'line-window-not-bound') composeStatus.textContent = '請先在 LINE 分頁綁定你確認的 LINE 主視窗。';
       else composeStatus.textContent = '目前無法準備讀取選取文字，請確認來源欄位後重試。';
@@ -196,9 +201,17 @@
     }
     changed();
     composeText.value = result.text;
-    capture = { selectionId: result.selectionId, captureRevision: result.captureRevision };
+    const ref = { selectionId: result.selectionId, captureRevision: result.captureRevision };
+    capture = ref;
     selectionHint.textContent = '來自 LINE 介面選取文字；來源聊天室由你填寫，未經平台驗證。';
     composeStatus.textContent = '已讀取選取文字。請核對來源與原文，再預覽目的地；未發送。';
+    void window.crosschatDesktop.acknowledgeSelectionCapture({ armId: result.armId, ...ref }).then(ack => {
+      if (ack.status !== 'accepted' && capture === ref) {
+        revoke(ref); capture = null;
+        selectionHint.textContent = '讀取結果已逾時；請重新準備讀取。';
+        composeStatus.textContent = '讀取結果未能保留，請重試。原文欄內容已保留。';
+      }
+    }).catch(() => { if (capture === ref) { revoke(ref); capture = null; } });
   });
   previewButton.addEventListener('click', async () => {
     if (armedSelection || armRequestPending) { editVersion++; cancelArmedSelection(); }

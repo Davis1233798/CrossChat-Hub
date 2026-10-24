@@ -31,6 +31,16 @@ function registerForwardingIpc(ipcMain, getWindow, shellUrl, drafts, lineBinding
       if (args.length > 1) throw new Error('Invalid selection cancel request');
       return selectionArming.cancel(args[0]);
     });
+    ipcMain.handle('crosschat:selection-arm-activate', (event, input, ...args) => {
+      if (!trusted(event)) throw new Error('Untrusted selection activation sender');
+      if (args.length) throw new Error('Invalid selection activation request');
+      return selectionArming.activate(input);
+    });
+    ipcMain.handle('crosschat:selection-arm-ack', (event, input, ...args) => {
+      if (!trusted(event)) throw new Error('Untrusted selection acknowledgement sender');
+      if (args.length) throw new Error('Invalid selection acknowledgement request');
+      return selectionArming.acknowledge(input);
+    });
   }
   if (lineBinding) {
     ipcMain.handle('crosschat:line-bind-list', (event, ...args) => {

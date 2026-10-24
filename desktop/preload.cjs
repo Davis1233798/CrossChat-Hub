@@ -16,7 +16,9 @@ contextBridge.exposeInMainWorld('crosschatDesktop', Object.freeze({
   prepareSelection: input => ipcRenderer.invoke('crosschat:selection-prepare', input),
   revokeSelection: input => ipcRenderer.invoke('crosschat:selection-revoke', input),
   armSelectionCapture: input => ipcRenderer.invoke('crosschat:selection-arm', input),
+  activateSelectionCapture: input => ipcRenderer.invoke('crosschat:selection-arm-activate', input),
   cancelSelectionCapture: input => ipcRenderer.invoke('crosschat:selection-arm-cancel', input),
+  acknowledgeSelectionCapture: input => ipcRenderer.invoke('crosschat:selection-arm-ack', input),
   onObservedSelection: callback => {
     ipcRenderer.on('crosschat:selection-observed', (_event, data) => callback(data));
   },

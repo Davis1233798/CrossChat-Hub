@@ -6,10 +6,14 @@ const os = require('node:os');
 const path = require('node:path');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'crosschat-smoke-'));
 process.env.CROSSCHAT_PRODUCT_SMOKE = '1';
-let simulatedHotkey = null, observedText = '隔離產品 smoke 選取文字', observationStatus = 'observed';
-let registeredAccelerator = null, unregisterCount = 0, observationCount = 0;
+let simulatedHotkey = null, triggerDuringRegistration = false, observedText = '隔離產品 smoke 選取文字', observationStatus = 'observed';
+let registeredAccelerator = null, unregisterCount = 0, observationCount = 0, registerCount = 0;
 globalThis[Symbol.for('crosschat.productSmokeHooks')] = {
-  registerShortcut(accelerator, callback) { registeredAccelerator = accelerator; simulatedHotkey = callback; return true; },
+  registerShortcut(accelerator, callback) {
+    registerCount++; registeredAccelerator = accelerator; simulatedHotkey = callback;
+    if (triggerDuringRegistration) { triggerDuringRegistration = false; callback(); }
+    return true;
+  },
   unregisterShortcut(accelerator) { if (registeredAccelerator === accelerator) { registeredAccelerator = null; simulatedHotkey = null; unregisterCount++; } },
   async observeSelection(platform) {
     observationCount++;
@@ -71,6 +75,7 @@ app.whenReady().then(async () => {
   await delay(100);
   if (!await window.webContents.executeJavaScript('document.getElementById("line-binding-status").textContent.includes("已綁定")')) throw new Error('Synthetic LINE candidate confirmation did not bind');
   if (!await window.webContents.executeJavaScript('document.getElementById("line-unbind").hidden === false')) throw new Error('Synthetic binding did not expose unbind');
+  triggerDuringRegistration = true;
   await window.webContents.executeJavaScript(`(() => {
     const mode=document.getElementById('compose-mode'); mode.value='selection'; mode.dispatchEvent(new Event('change'));
     document.getElementById('source-platform').value='line';
@@ -82,12 +87,9 @@ app.whenReady().then(async () => {
     document.getElementById('selection-arm').click();
   })()`);
   await delay(100);
-  if (registeredAccelerator !== 'CommandOrControl+Shift+Alt+S' || !simulatedHotkey) throw new Error('Selection arm did not register the fixed temporary shortcut');
-  if (!await window.webContents.executeJavaScript('document.getElementById("selection-cancel").hidden === false && document.getElementById("selection-source-hint").textContent.includes("切回 LINE")')) throw new Error('Selection arm instructions were not shown');
-  const triggerSmokeHotkey = simulatedHotkey;
-  triggerSmokeHotkey(); // Simulated main-process shortcut callback; this is not an OS hotkey or LINE reader.
+  if (registerCount !== 1 || registeredAccelerator !== null || simulatedHotkey !== null) throw new Error('Immediate simulated hotkey did not consume the temporary shortcut exactly once');
   await delay(150);
-  if (registeredAccelerator !== null || observationCount !== 1) throw new Error('Simulated hotkey did not consume the arm exactly once');
+  if (observationCount !== 1) throw new Error('Immediate simulated hotkey did not produce exactly one observation');
   const observed = await window.webContents.executeJavaScript(`({text:document.getElementById('compose-text').value,
     status:document.getElementById('compose-status').textContent,
     hint:document.getElementById('selection-source-hint').textContent})`);
