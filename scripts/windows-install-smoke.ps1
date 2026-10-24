@@ -1,15 +1,93 @@
 # Developer CI only: installs and removes a build on a disposable Windows runner.
 # Never offer this script as an end-user installation or repair step.
 $ErrorActionPreference = 'Stop'
+$diagnosticRoot = Join-Path $env:RUNNER_TEMP 'crosschat-windows-install-smoke'
+New-Item -ItemType Directory -Path $diagnosticRoot -Force | Out-Null
+$setupAttempts = [System.Collections.Generic.List[object]]::new()
+$scriptStartedAt = (Get-Date).ToUniversalTime()
+$script:lastSetupStartedAt = $null
 $installer = Get-ChildItem dist -Filter 'CrossChat-Hub-*-win-x64.exe' | Select-Object -First 1
 if (-not $installer) { throw 'NSIS executable missing' }
 $appPath = Join-Path $env:LOCALAPPDATA 'Programs\CrossChat Hub\CrossChat Hub.exe'
 if (Test-Path -LiteralPath $appPath) { throw 'This test requires a clean disposable Windows runner' }
 
+function Save-SetupAttempts {
+    $setupAttempts | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $diagnosticRoot 'setup-attempts.json') -Encoding utf8
+}
+
 function Invoke-Setup {
-    $setup = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -PassThru -Wait
+    $attemptNumber = $setupAttempts.Count + 1
+    $stdoutPath = Join-Path $diagnosticRoot "setup-$attemptNumber.stdout.txt"
+    $stderrPath = Join-Path $diagnosticRoot "setup-$attemptNumber.stderr.txt"
+    $startedAt = (Get-Date).ToUniversalTime()
+    $script:lastSetupStartedAt = $startedAt
+    $installerHash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash
+    $attempt = [ordered]@{
+        path = $installer.FullName
+        sha256 = $installerHash
+        startedAtUtc = $startedAt.ToString('o')
+        endedAtUtc = $null
+        exitCode = $null
+        launchError = $null
+        stdoutPath = $stdoutPath
+        stderrPath = $stderrPath
+    }
+    $setupAttempts.Add($attempt)
+    try {
+        $setup = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -PassThru -Wait `
+            -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        $attempt.exitCode = $setup.ExitCode
+    } catch {
+        $attempt.launchError = $_.Exception.Message
+        throw
+    } finally {
+        $attempt.endedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+        Save-SetupAttempts
+    }
     if ($setup.ExitCode -ne 0) { throw "Silent installation failed with code $($setup.ExitCode)" }
     if (-not (Test-Path -LiteralPath $appPath)) { throw "Installed EXE not found: $appPath" }
+}
+
+function Save-FailureDiagnostics {
+    $failedAt = (Get-Date).ToUniversalTime()
+    $eventStart = if ($script:lastSetupStartedAt) { $script:lastSetupStartedAt.AddSeconds(-2) } else { $scriptStartedAt }
+    $events = @()
+    try {
+        $events = @(Get-WinEvent -FilterHashtable @{
+            LogName = 'Application'
+            Id = @(1000, 1001, 1026)
+            StartTime = $eventStart
+            EndTime = $failedAt.AddSeconds(2)
+        } -ErrorAction Stop | Select-Object -Last 15 | ForEach-Object {
+            $event = $_
+            $eventData = @{}
+            try {
+                [xml]$xml = $event.ToXml()
+                foreach ($item in $xml.Event.EventData.Data) {
+                    if ($item.Name) { $eventData[[string]$item.Name] = [string]$item.InnerText }
+                }
+            } catch { }
+            $message = [string]$event.Message
+            if ($message.Length -gt 3000) { $message = $message.Substring(0, 3000) }
+            [pscustomobject]@{
+                timeUtc = $event.TimeCreated.ToUniversalTime().ToString('o')
+                provider = $event.ProviderName
+                id = $event.Id
+                eventData = $eventData
+                message = $message
+            }
+        })
+    } catch {
+        $events = @([pscustomobject]@{ queryError = $_.Exception.Message })
+    }
+
+    $diagnostics = [ordered]@{
+        failedAtUtc = $failedAt.ToString('o')
+        setupAttempts = @($setupAttempts)
+        applicationEvents = $events
+    }
+    $diagnostics | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $diagnosticRoot 'failure-diagnostics.json') -Encoding utf8
+    Write-Output "Failure diagnostics saved to $diagnosticRoot"
 }
 function Start-TestWindow {
     # This is the foreground application under test, not a background helper.
@@ -58,6 +136,9 @@ try {
     $remaining = Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $appPath }
     if ($remaining) { throw 'Installed app process remains after uninstall' }
     Write-Output 'PASS: uninstall while running; executable and processes removed'
+} catch {
+    try { Save-FailureDiagnostics } catch { Write-Warning "Could not save installer failure diagnostics: $($_.Exception.Message)" }
+    throw
 } finally {
     if ($running -and -not $running.HasExited) { Stop-Process -Id $running.Id -Force }
 }

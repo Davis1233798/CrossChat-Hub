@@ -91,6 +91,16 @@ jobs:
         if: matrix.platform == 'win'
         shell: pwsh
         run: ./scripts/windows-install-smoke.ps1
+      - name: Upload Windows installer smoke diagnostics
+        if: always() && matrix.platform == 'win'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-install-smoke-diagnostics
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/crosschat-windows-install-smoke/**
+            dist/CrossChat-Hub-*-win-x64.exe
       - name: Independent MSI clean installation, launch, relaunch and removal
         if: matrix.platform == 'win'
         shell: pwsh
