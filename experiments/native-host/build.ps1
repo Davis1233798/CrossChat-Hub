@@ -11,4 +11,8 @@ $crashSource = Join-Path $PSScriptRoot 'CrashStudy.cs'
 $crashExecutable = Join-Path $outputDir 'CrashStudy.exe'
 & $compiler /nologo /target:exe /platform:x64 /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/out:$crashExecutable" $crashSource
 if ($LASTEXITCODE -ne 0) { throw 'Crash study compilation failed' }
+$brokerSource = Join-Path $PSScriptRoot 'BrokerStudy.cs'
+$brokerExecutable = Join-Path $outputDir 'BrokerStudy.exe'
+& $compiler /nologo /target:exe /platform:x64 /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/out:$brokerExecutable" $brokerSource
+if ($LASTEXITCODE -ne 0) { throw 'Broker study compilation failed' }
 Write-Output (Join-Path $outputDir 'NativeHost.exe')
