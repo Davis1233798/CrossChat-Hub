@@ -68,6 +68,8 @@ jobs:
         run: npm run test:desktop
       - name: Session persistence, isolated reset and real process restart (synthetic fixture)
         run: npm run test:session
+      - name: Workspace restore and reset across processes (synthetic navigation, no login)
+        run: npm run test:workspace
       - name: Build desktop installers
         run: npm run desktop:${{ matrix.platform }} -- --${{ matrix.arch }} --publish never
       - name: Validate generated installers

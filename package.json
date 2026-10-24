@@ -21,7 +21,8 @@
     "desktop:mac:intel": "electron-builder --mac dmg zip --x64",
     "desktop:mac:arm": "electron-builder --mac dmg zip --arm64",
     "test:desktop": "electron scripts/desktop-smoke.cjs",
-    "test:session": "node scripts/session-persistence-smoke.mjs"
+    "test:session": "node scripts/session-persistence-smoke.mjs",
+    "test:workspace": "node scripts/workspace-persistence-smoke.mjs"
   },
   "license": "MIT",
   "main": "desktop/main.cjs",

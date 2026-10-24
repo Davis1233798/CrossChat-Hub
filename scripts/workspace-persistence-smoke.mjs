@@ -14,14 +14,22 @@ const fixture = createServer((_request, response) => {
 await new Promise(resolve => fixture.listen(0, '127.0.0.1', resolve));
 const origin = `http://127.0.0.1:${fixture.address().port}`;
 try {
-  for (const phase of ['seed', 'restore-clear', 'cleared']) {
+  for (const phase of ['assert-failure', 'seed', 'restore-clear', 'cleared']) {
     await new Promise((resolve, reject) => {
-      const env = { ...process.env, CROSSCHAT_WORKSPACE_PROFILE: profile, CROSSCHAT_WORKSPACE_ORIGIN: origin, CROSSCHAT_WORKSPACE_PHASE: phase };
+      const failure = phase === 'assert-failure';
+      const env = { ...process.env, CROSSCHAT_WORKSPACE_PROFILE: profile, CROSSCHAT_WORKSPACE_ORIGIN: origin,
+        CROSSCHAT_WORKSPACE_PHASE: failure ? 'seed' : phase, CROSSCHAT_WORKSPACE_ASSERT_FAILURE: failure ? '1' : '0' };
       delete env.ELECTRON_RUN_AS_NODE;
       const child = spawn(electron, [fileURLToPath(new URL('./workspace-persistence-child.cjs', import.meta.url))], { env, stdio: 'inherit' });
       const deadline = setTimeout(() => { child.kill(); reject(Error(`Workspace ${phase} timeout`)); }, 30000);
       child.once('error', error => { clearTimeout(deadline); reject(error); });
-      child.once('exit', code => { clearTimeout(deadline); code === 0 ? resolve() : reject(Error(`Workspace ${phase} exited ${code}`)); });
+      child.once('exit', code => {
+        clearTimeout(deadline);
+        if (code === (failure ? 1 : 0)) {
+          if (failure) console.log('PASS: intentional assertion failure exits nonzero');
+          resolve();
+        } else reject(Error(`Workspace ${phase} exited ${code}`));
+      });
     });
   }
   console.log('PASS: canonical workspace consumed across real process restart and cleared durably; provider events/navigation simulated, no real login verified');

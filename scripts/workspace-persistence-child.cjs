@@ -4,11 +4,12 @@
 const { app, BrowserWindow, session, dialog } = require('electron');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const os = require('node:os');
 const { createWorkspaceState } = require('../desktop/workspace-state.cjs');
 const profile = process.env.CROSSCHAT_WORKSPACE_PROFILE;
 const origin = process.env.CROSSCHAT_WORKSPACE_ORIGIN;
 const phase = process.env.CROSSCHAT_WORKSPACE_PHASE;
-if (!profile || !path.isAbsolute(profile) || !path.basename(profile).startsWith('crosschat-workspace-smoke-') ||
+if (!profile || !path.isAbsolute(profile) || path.resolve(path.dirname(profile)) !== path.resolve(os.tmpdir()) || !path.basename(profile).startsWith('crosschat-workspace-smoke-') ||
     !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin) || !['seed', 'restore-clear', 'cleared'].includes(phase)) throw Error('Disposable fixture arguments required');
 app.setPath('userData', profile);
 const expected = 'https://app.slack.com/client/TTEST123';
@@ -23,7 +24,7 @@ app.on('web-contents-created', (_event, contents) => {
 });
 require('../desktop/main.cjs');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-const deadline = setTimeout(() => { console.error('Workspace smoke timed out'); app.exit(1); }, 20000);
+const deadline = setTimeout(() => failTest(Error('Workspace smoke timed out')), 20000);
 app.whenReady().then(async () => {
   let window;
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -32,6 +33,7 @@ app.whenReady().then(async () => {
     await delay(50);
   }
   assert.equal(window?.isVisible(), true);
+  if (process.env.CROSSCHAT_WORKSPACE_ASSERT_FAILURE === '1') assert.fail('Intentional workspace smoke assertion failure');
   await window.webContents.executeJavaScript('window.crosschatDesktop.switchTab("slack")');
   const contents = window.contentView.children[0].webContents;
   if (contents.isLoading()) await new Promise(resolve => contents.once('did-stop-loading', resolve));
@@ -53,4 +55,16 @@ app.whenReady().then(async () => {
   console.log(`PASS: workspace ${phase}; real Electron main, intercepted synthetic provider navigation`);
   clearTimeout(deadline);
   window.close();
-}).catch(error => { console.error(error); app.exit(1); });
+}).catch(failTest);
+function failTest(error) {
+  console.error(error);
+  // app.exit closes windows; the production window-all-closed shutdown must
+  // not replace this test's assertion failure with a successful exit code.
+  app.removeAllListeners('window-all-closed');
+  app.removeAllListeners('before-quit');
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.removeAllListeners('close');
+    window.removeAllListeners('closed');
+  }
+  app.exit(1);
+}
