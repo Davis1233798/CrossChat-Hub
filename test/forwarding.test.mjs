@@ -113,3 +113,14 @@ test('forwarding a Hub-originated message preserves local origin and actual visi
   const firstCompose = await prepareForward({ source: origin, route }, adapter());
   assert.equal(firstCompose.plan.dedupeKey, result.plan.dedupeKey);
 });
+test('malformed or inconsistent prepared plans fail before ledger claim or execute', async () => {
+  let claims = 0, sends = 0;
+  const client = adapter({ execute: async () => { sends++; } });
+  const ledger = { claim() { claims++; return true; }, settle() {} };
+  const original = await prepareForward({ source, route }, client);
+  for (const change of [p => { p.dedupeKey = 'bad'; }, p => { p.target.chatId = 'changed'; }, p => { p.attachments = null; }, p => { p.mention.required = false; }, p => { p.trace = null; }]) {
+    const malformed = structuredClone(original); change(malformed.plan);
+    assert.equal((await executeForward(malformed, client, ledger)).reason, 'invalid-prepared-plan');
+  }
+  assert.equal(claims, 0); assert.equal(sends, 0);
+});

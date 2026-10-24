@@ -52,6 +52,18 @@ accept an arbitrary renderer-supplied `prepared` plan, target ID or dedupe key
 for execution. This module is an internal orchestration boundary, not an IPC
 authorization layer. Plans must be revalidated after account/chat changes.
 
+`desktop/forwarding-drafts.mjs` supplies this main-private draft service, without
+desktop IPC/UI wiring. `prepare({text, draftId?, revision?})` generates an opaque
+main-owned ID for new compose messages and retains the resolved plan internally.
+Editing needs the current revision and invalidates prior preparation, including
+late asynchronous results. Responses expose only display-name preview/status.
+`execute(draftId, revision)` checks expiry and resolves again; a changed adapter,
+chat or member invalidates the plan rather than redirecting. Dispatch is single
+use, and ambiguous execution outcomes require reconciliation. The default
+adapter registry is empty, so current calls return explicit unsupported previews
+and cannot send. Draft lifetime is in-memory; persistent retry/reconciliation
+still relies on the ledger and must not reconstruct a new draft to evade it.
+
 Forwarding keeps the original platform/account/chat/message tuple in `trace`,
 plus visited chats. Same-chat, returning-to-origin, visited-chat and eight-hop
 routes are blocked. The stable key covers original source, exact destination

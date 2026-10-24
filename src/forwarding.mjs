@@ -92,6 +92,16 @@ export async function prepareForward({ route, source, attachments = [], trace = 
 // This is an adapter integration seam, not an installed personal-chat adapter.
 export async function executeForward(prepared, adapter, ledger) {
   const plan = prepared?.plan;
+  if (prepared?.status !== 'prepared' || !plan || plan.version !== 1 || !validChat(plan.target) ||
+      (!isCompose(plan.source) && !isForward(plan.source)) || typeof plan.text !== 'string' ||
+      !Array.isArray(plan.attachments) || plan.attachments.some(a => !a || !exactId(a.id) || !exactId(a.name) || !exactId(a.mimeType) || !Number.isSafeInteger(a.size) || a.size < 0) ||
+      (!plan.text.trim() && !plan.attachments.length) ||
+      (plan.mention !== null && (!plan.mention || !exactId(plan.mention.memberId) || plan.mention.required !== true)) ||
+      (!isCompose(plan.trace?.origin) && !isForward(plan.trace?.origin)) ||
+      !Array.isArray(plan.trace?.visited) || plan.trace.visited.some(c => !validChat(c)) || plan.trace.visited.length > 8 ||
+      [plan.source, plan.trace.origin, ...plan.trace.visited].filter(validChat).some(c => chatKey(c) === chatKey(plan.target))) return invalid('invalid-prepared-plan');
+  const expectedKey = createHash('sha256').update(JSON.stringify([sourceKey(plan.trace.origin), plan.target.platform, plan.target.accountId, plan.target.chatId, plan.mention?.memberId ?? null])).digest('hex');
+  if (plan.dedupeKey !== expectedKey) return invalid('invalid-prepared-plan');
   if (prepared?.status !== 'prepared' || !plan || !adapter ||
       adapter.platform !== plan.target.platform || adapter.accountKind !== 'personal' ||
       typeof adapter.execute !== 'function' || !adapter.capabilities?.sendText ||
