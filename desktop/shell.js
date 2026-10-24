@@ -57,6 +57,7 @@
     try {
       const result = await window.crosschatDesktop.listLineCandidates();
       lineUnbind.hidden = !result.bound;
+      if (result.status === 'stale') { lineBindingStatus.textContent = '候選清單已更新，請重新列出 LINE 視窗。'; return; }
       if (result.status !== 'available') { lineBindingStatus.textContent = '目前無法確認 LINE 主視窗（Windows 開發版 helper 或官方簽章驗證不可用）。'; return; }
       lineBindingStatus.textContent = result.candidates.length ? '請逐一確認視窗；程式不會替你選擇。' : '未找到符合條件的官方 LINE 主視窗。';
       for (const candidate of result.candidates) {

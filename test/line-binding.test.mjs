@@ -41,6 +41,40 @@ test('candidate handles expire and unbind clears the private witness', async () 
   assert.equal(await binding.witnessFor('line'), null);
 });
 
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+test('unbind during pending candidate validation cannot restore the binding', async () => {
+  const validation = deferred();
+  const binding = createLineBinding({ listCandidates: async () => [a], validateWitness: () => validation.promise });
+  const listed = await binding.list();
+  const pendingBind = binding.bind({ candidateId: listed.candidates[0].candidateId, confirmed: true });
+  assert.equal(binding.unbind().status, 'unbound');
+  validation.resolve(a);
+  assert.equal((await pendingBind).status, 'expired');
+  assert.equal(binding.state().bound, false);
+  assert.equal(await binding.witnessFor('line'), null);
+});
+
+test('overlapping candidate scans publish only the latest completed request generation', async () => {
+  const scans = [deferred(), deferred()]; let index = 0;
+  const binding = createLineBinding({ listCandidates: () => scans[index++].promise, validateWitness: async w => w });
+  const earlier = binding.list();
+  const latest = binding.list();
+  scans[1].resolve([b]);
+  const current = await latest;
+  assert.equal(current.status, 'available');
+  scans[0].resolve([a]);
+  const stale = await earlier;
+  assert.equal(stale.status, 'stale');
+  assert.deepEqual(stale.candidates, []);
+  assert.equal((await binding.bind({ candidateId: current.candidates[0].candidateId, confirmed: true })).status, 'bound');
+  assert.equal((await binding.witnessFor('line')).hwnd, b.hwnd);
+});
+
 function witnessHelper(transform = data => data, options = {}) {
   let killed = 0;
   const client = createLineWitnessClient({ binaryPath: resolve('fixed-LineWitness.exe'), timeoutMs: 30,
