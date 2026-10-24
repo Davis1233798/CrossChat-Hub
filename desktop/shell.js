@@ -128,9 +128,21 @@
   const sourceChat = document.getElementById('source-chat');
   const routeInput = document.getElementById('compose-route');
   let draft = null, capture = null, editVersion = 0;
+  const selectionArm = document.getElementById('selection-arm');
+  const selectionCancel = document.getElementById('selection-cancel');
+  const selectionHint = document.getElementById('selection-source-hint');
+  let armedSelection = null, armRequestPending = false;
   function revoke(ref) { if (ref) void window.crosschatDesktop.revokeSelection(ref).catch(() => {}); }
+  function cancelArmedSelection() {
+    const arm = armedSelection; armedSelection = null;
+    selectionArm.hidden = mode.value !== 'selection' || sourcePlatform.value !== 'line';
+    selectionCancel.hidden = true;
+    selectionHint.textContent = '人工貼入，來源未經平台驗證';
+    if (arm) void window.crosschatDesktop.cancelSelectionCapture({ armId: arm.armId }).catch(() => {});
+  }
   function changed() {
     editVersion++;
+    cancelArmedSelection();
     revoke(capture); capture = null; draft = null;
     composeStatus.textContent = '內容已變更，請重新預覽目的地。尚未發送。';
   }
@@ -144,8 +156,52 @@
     document.getElementById('compose-text-label').textContent = forwarding ? '貼入要轉發的單則原文' : '跨軟體訊息';
     document.getElementById('compose-help').textContent = forwarding ? '請自行核對來源及原文；預覽不會發送訊息' : '例如 @line:群組名:人名 要說的話；名稱含空白請用雙引號';
     composeText.placeholder = forwarding ? '貼入你選擇的單則文字；不會自動讀取聊天記錄' : '@line:群組名 訊息內容';
+    selectionArm.hidden = !forwarding || sourcePlatform.value !== 'line';
+  });
+  sourcePlatform.addEventListener('change', () => { selectionArm.hidden = mode.value !== 'selection' || sourcePlatform.value !== 'line'; });
+  selectionArm.addEventListener('click', async () => {
+    if (armedSelection || mode.value !== 'selection' || sourcePlatform.value !== 'line' || !sourceChat.value.trim()) {
+      composeStatus.textContent = '請選擇 LINE 並填寫來源聊天室名稱。尚未讀取或發送。'; return;
+    }
+    const requestVersion = editVersion;
+    armRequestPending = true;
+    selectionArm.disabled = true;
+    try {
+      const result = await window.crosschatDesktop.armSelectionCapture({ platform: 'line', chatName: sourceChat.value });
+      if (result.status === 'armed') {
+        if (requestVersion !== editVersion || mode.value !== 'selection' || sourcePlatform.value !== 'line') {
+          void window.crosschatDesktop.cancelSelectionCapture({ armId: result.armId }).catch(() => {});
+          return;
+        }
+        armedSelection = { armId: result.armId, editVersion };
+        selectionArm.hidden = true; selectionCancel.hidden = false;
+        selectionHint.textContent = '30 秒內切回 LINE，選取單則文字後按 Ctrl+Shift+Alt+S。尚未讀取或發送。';
+        composeStatus.textContent = '等待你在已綁定的 LINE 視窗選取文字並按快捷鍵。';
+      } else if (result.reason === 'shortcut-unavailable') composeStatus.textContent = '快捷鍵正在被其他程式使用。請關閉該程式後重試。';
+      else if (result.reason === 'line-window-not-bound') composeStatus.textContent = '請先在 LINE 分頁綁定你確認的 LINE 主視窗。';
+      else composeStatus.textContent = '目前無法準備讀取選取文字，請確認來源欄位後重試。';
+    } catch { composeStatus.textContent = '無法準備讀取選取文字。尚未讀取或發送。'; }
+    finally { armRequestPending = false; selectionArm.disabled = false; }
+  });
+  selectionCancel.addEventListener('click', cancelArmedSelection);
+  window.crosschatDesktop.onObservedSelection(result => {
+    const arm = armedSelection;
+    if (!arm || result.armId !== arm.armId || arm.editVersion !== editVersion) return;
+    armedSelection = null; selectionCancel.hidden = true;
+    selectionArm.hidden = mode.value !== 'selection' || sourcePlatform.value !== 'line';
+    if (result.status !== 'captured') {
+      selectionHint.textContent = '讀取失敗；原文欄內容已保留。';
+      composeStatus.textContent = result.status === 'expired' ? '讀取準備已逾時。原文欄未變更。' : '未能讀取單則選取文字。請確認焦點仍在 LINE、僅選取一則文字，然後重試。原文欄未變更。';
+      return;
+    }
+    changed();
+    composeText.value = result.text;
+    capture = { selectionId: result.selectionId, captureRevision: result.captureRevision };
+    selectionHint.textContent = '來自 LINE 介面選取文字；來源聊天室由你填寫，未經平台驗證。';
+    composeStatus.textContent = '已讀取選取文字。請核對來源與原文，再預覽目的地；未發送。';
   });
   previewButton.addEventListener('click', async () => {
+    if (armedSelection || armRequestPending) { editVersion++; cancelArmedSelection(); }
     const version = editVersion;
     previewButton.disabled = true;
     try {
@@ -166,7 +222,7 @@
       if (version !== editVersion) return;
       if (result.draftId) draft = { draftId: result.draftId, revision: result.revision };
       const p = result.preview;
-      const source = result.source ? `來源：${result.source.platform}「${result.source.chatName}」（人工確認，未經平台驗證） → ` : '';
+      const source = result.source ? `來源：${result.source.platform}「${result.source.chatName}」（${result.source.provenance === 'ui-selected-text-unverified-origin' ? '介面選取，來源未經平台驗證' : '人工確認，未經平台驗證'}） → ` : '';
       if (p) composeStatus.textContent = `${source}${p.platform}「${p.chatName}」${p.memberName ? ` · 提及「${p.memberName}」` : ''}。此平台尚未接通傳送，未發送。`;
       else {
         if (result.status === 'rejected') draft = null;

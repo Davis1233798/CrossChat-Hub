@@ -123,12 +123,18 @@ and selected-text provenance. Timeout terminates only the helper spawned for
 that request. Text and arbitrary diagnostics are never logged.
 `captureObservedSelection` creates a private capture marked
 `ui-selected-text-unverified-origin`, without a platform message ID or verified
-chat label. Main currently registers **no window bindings**, so the request is
-unsupported and never launches a helper against a user's account by default.
+chat label. In the Windows development build, the shell can arm a 30-second
+read for a bound LINE window. The main process temporarily registers
+`Ctrl+Shift+Alt+S`; the user switches back to LINE, selects one message, and
+presses the shortcut. Cancellation, timeout, rebinding, unbinding, and shutdown
+unregister it. Renderer code cannot choose the shortcut or window witness.
+The shortcut delivers selected text for a local draft preview only; it does not
+send messages. Packaged builds and other platforms do not expose LINE binding.
 
-Positive/negative transport tests use owned test doubles. The new transport's
-actual owned WPF fixture run returned a safe observation refusal; it did not
-establish end-to-end selected-text acquisition through this client. The earlier
-direct focused sidecar success remains a narrower result. Production window
-binding, binary distribution and provider validation remain prerequisites for a
-working native capture control.
+Positive/negative transport tests use owned test doubles. The isolated desktop
+smoke uses a synthetic LINE witness and a simulated main-process shortcut; it
+does not exercise an OS hotkey, the native reader, or a real LINE window. The
+new transport's actual owned WPF fixture run returned a safe observation
+refusal; it did not establish end-to-end selected-text acquisition through
+this client. Production window binding, binary distribution and provider
+validation remain prerequisites for reliable native capture.

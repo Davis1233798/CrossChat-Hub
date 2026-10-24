@@ -1,5 +1,5 @@
 'use strict';
-function registerForwardingIpc(ipcMain, getWindow, shellUrl, drafts, lineBinding = null) {
+function registerForwardingIpc(ipcMain, getWindow, shellUrl, drafts, lineBinding = null, selectionArming = null) {
   const trusted = event => {
     const window = getWindow();
     return window && !window.isDestroyed() && event.sender === window.webContents &&
@@ -14,10 +14,22 @@ function registerForwardingIpc(ipcMain, getWindow, shellUrl, drafts, lineBinding
     if (typeof id !== 'string' || !Number.isSafeInteger(revision) || revision < 1) throw new Error('Invalid draft reference');
     return drafts.execute(id, revision);
   });
-  for (const [channel, method] of [['selection-capture', 'captureSelection'], ['selection-observe', 'captureObservedSelection'], ['selection-prepare', 'prepareSelection'], ['selection-revoke', 'revokeSelection']]) {
+  for (const [channel, method] of [['selection-capture', 'captureSelection'], ['selection-prepare', 'prepareSelection'], ['selection-revoke', 'revokeSelection']]) {
     ipcMain.handle(`crosschat:${channel}`, (event, input) => {
       if (!trusted(event)) throw new Error('Untrusted composer sender');
       return drafts[method](input);
+    });
+  }
+  if (selectionArming) {
+    ipcMain.handle('crosschat:selection-arm', (event, input, ...args) => {
+      if (!trusted(event)) throw new Error('Untrusted selection arm sender');
+      if (args.length) throw new Error('Invalid selection arm request');
+      return selectionArming.arm(input);
+    });
+    ipcMain.handle('crosschat:selection-arm-cancel', (event, ...args) => {
+      if (!trusted(event)) throw new Error('Untrusted selection arm sender');
+      if (args.length > 1) throw new Error('Invalid selection cancel request');
+      return selectionArming.cancel(args[0]);
     });
   }
   if (lineBinding) {
@@ -29,11 +41,13 @@ function registerForwardingIpc(ipcMain, getWindow, shellUrl, drafts, lineBinding
     ipcMain.handle('crosschat:line-bind-confirm', (event, input, ...args) => {
       if (!trusted(event)) throw new Error('Untrusted LINE binding sender');
       if (args.length) throw new Error('Invalid LINE confirmation request');
+      selectionArming?.close();
       return lineBinding.bind(input);
     });
     ipcMain.handle('crosschat:line-bind-clear', (event, ...args) => {
       if (!trusted(event)) throw new Error('Untrusted LINE binding sender');
       if (args.length) throw new Error('Invalid LINE unbind request');
+      selectionArming?.close();
       return lineBinding.unbind();
     });
   }

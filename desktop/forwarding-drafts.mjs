@@ -67,7 +67,7 @@ export function createForwardingDrafts({ adapterFor = () => null, observeSelecti
       if (capture.status !== 'captured') return capture;
       const selected = selections.get(capture.selectionId);
       selected.source.provenance = 'ui-selected-text-unverified-origin';
-      return { ...capture, provenance: selected.source.provenance };
+      return { ...capture, text: result.text, provenance: selected.source.provenance };
     },
     captureSelection(input) {
       if (!input || typeof input !== 'object' || Object.keys(input).some(k => !['text', 'platform', 'chatName'].includes(k)) ||

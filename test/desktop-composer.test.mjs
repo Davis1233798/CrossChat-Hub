@@ -8,7 +8,8 @@ import { createForwardingDrafts } from '../desktop/forwarding-drafts.mjs';
 test('preload IPC traverses main-frame guard into private draft service', async () => {
   const handlers = new Map(), url = 'file:///owned/shell.html';
   const frame = { url }, contents = { mainFrame: frame }, window = { webContents: contents, isDestroyed: () => false };
-  registerForwardingIpc({ handle: (key, fn) => handlers.set(key, fn) }, () => window, url, createForwardingDrafts());
+  const arming = { arm: async input => ({ status: 'armed', armId: 'opaque' }), cancel: input => ({ status: 'cancelled' }), close() {} };
+  registerForwardingIpc({ handle: (key, fn) => handlers.set(key, fn) }, () => window, url, createForwardingDrafts(), null, arming);
   let exposed;
   const event = { sender: contents, senderFrame: frame };
   vm.runInNewContext(readFileSync(new URL('../desktop/preload.cjs', import.meta.url), 'utf8'), {
@@ -21,8 +22,7 @@ test('preload IPC traverses main-frame guard into private draft service', async 
   assert.equal(result.status, 'unsupported'); assert.equal(result.preview.memberName, '小明');
   assert.equal(result.plan, undefined); assert.equal(result.target, undefined);
   assert.equal((await exposed.executeDraft(result.draftId, result.revision)).status, 'unsupported');
-  assert.equal((await exposed.captureObservedSelection({ platform: 'line', chatName: 'Human label' })).status, 'unsupported');
-  assert.equal((await exposed.captureObservedSelection({ platform: 'line', chatName: 'Human label', hwnd: 'forged' })).status, 'rejected');
+  assert.equal(exposed.captureObservedSelection, undefined);
   const capture = await exposed.captureSelection({ text: '單則原文', platform: 'line', chatName: '來源群' });
   const ref = { selectionId: capture.selectionId, captureRevision: capture.captureRevision };
   const forward = await exposed.prepareSelection({ ...ref, routeText: '@slack:目標頻道' });
@@ -31,12 +31,14 @@ test('preload IPC traverses main-frame guard into private draft service', async 
   assert.equal((await exposed.captureSelection({ text: 'x', platform: 'line', chatName: '群', selectionId: 'forged' })).status, 'rejected');
   assert.equal((await exposed.prepareSelection({ ...ref, routeText: '@slack:頻道 偷換內容' })).status, 'rejected');
   assert.equal((await exposed.revokeSelection(ref)).status, 'revoked');
+  assert.equal((await exposed.armSelectionCapture({ platform: 'line', chatName: '合成來源' })).status, 'armed');
+  assert.equal((await exposed.cancelSelectionCapture({ armId: 'opaque' })).status, 'cancelled');
   assert.equal((await exposed.executeDraft(forward.draftId, forward.revision)).status, 'rejected');
   for (const bad of [
     { sender: {}, senderFrame: frame }, // remote view or popup
     { sender: contents, senderFrame: { url } }, // iframe, including same-origin
     { sender: contents, senderFrame: null },
-  ]) for (const channel of ['draft-prepare', 'selection-capture', 'selection-observe', 'selection-prepare', 'selection-revoke']) assert.throws(() => handlers.get(`crosschat:${channel}`)(bad, { text: 'x' }), /Untrusted/);
+  ]) for (const channel of ['draft-prepare', 'selection-capture', 'selection-prepare', 'selection-revoke', 'selection-arm', 'selection-arm-cancel']) assert.throws(() => handlers.get(`crosschat:${channel}`)(bad, { text: 'x' }), /Untrusted/);
   frame.url = 'https://example.com/';
   assert.throws(() => handlers.get('crosschat:draft-prepare')(event, { text: 'x' }), /Untrusted/);
 });
@@ -47,6 +49,8 @@ test('shell composer uses text-only previews and reserves space below external v
   assert.match(html, /id="compose-send" disabled/);
   assert.match(html, /textarea id="compose-text"/);
   assert.match(js, /prepareDraft\(input\)/); assert.doesNotMatch(js, /executeDraft\(|innerHTML/);
+  assert.match(html, /id="selection-arm"/); assert.match(js, /armSelectionCapture/); assert.match(js, /onObservedSelection/);
+  assert.doesNotMatch(readFileSync(new URL('../desktop/preload.cjs', import.meta.url), 'utf8'), /captureObservedSelection/);
   assert.match(main, /height - HEADER_HEIGHT - COMPOSER_HEIGHT/);
   assert.match(main, /path\.join\(app\.getPath\('userData'\), 'forwarding-ledger'\)/);
 });

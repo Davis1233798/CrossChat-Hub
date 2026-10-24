@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, WebContentsView, ipcMain, shell, session, dialog } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, shell, session, dialog, globalShortcut } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { SERVICES, LINE_DOWNLOADS, getService } = require('./tab-config.cjs');
@@ -12,6 +12,7 @@ const { createForwardingLedger } = require('./forwarding-ledger.cjs');
 const { registerForwardingIpc } = require('./forwarding-ipc.cjs');
 const { createLineBinding } = require('./line-binding.cjs');
 const { createLineWitnessClient } = require('./line-witness-client.cjs');
+const { createSelectionArming } = require('./selection-arming.cjs');
 const { isOfficialOrigin, canCheckPermission, needsUserApproval } = require('./permissions.cjs');
 // Must precede single-instance lock AND every profile-backed store/session.
 const brokerStudy = require('./native-broker-study.cjs').configureBrokerStudy(app);
@@ -33,6 +34,7 @@ const permissionVersions = new Map();
 const activeDownloads = new Map();
 let externalPromptPending = false;
 let closing = false;
+let cancelSelectionArm = () => {};
 const workspaceState = createWorkspaceState(path.join(app.getPath('userData'), 'workspace-state'));
 
 function rememberWorkspace(contents, service) {
@@ -255,6 +257,7 @@ function attachHotkeys(contents) {
 const quitSafely = createShutdown({
   prepare: () => {
     closing = true;
+    cancelSelectionArm();
     brokerStudy?.beginShutdown();
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
     // Stop every remote writer, including authentication popups, before flushing.
@@ -306,23 +309,35 @@ if (singleInstance) {
     if (brokerStudy) await brokerStudy.start();
     const { createForwardingDrafts } = await import('./forwarding-drafts.mjs');
     const { createNativeSelectionClient } = await import('./native-selection-client.mjs');
+    const smokeHooks = process.env.CROSSCHAT_PRODUCT_SMOKE === '1' && path.basename(process.argv[1] ?? '') === 'desktop-smoke.cjs'
+      ? globalThis[Symbol.for('crosschat.productSmokeHooks')] : null;
     const lineWitness = process.platform === 'win32' && !app.isPackaged ? createLineWitnessClient({
       binaryPath: path.join(__dirname, '..', 'build', 'bin', 'native-host', 'LineWitness.exe'),
     }) : null;
+    const fixtureWitness = { pid: 8123, startTicks: '420024', hwnd: '9123', path: 'C:\\fixtures\\LINE.exe',
+      publisher: 'Synthetic Routing Fixture', sha256: 'f'.repeat(64), dpiContext: 'synthetic-fixture' };
     const lineBinding = createLineBinding({
-      listCandidates: () => lineWitness ? lineWitness.listCandidates() : Promise.reject(new Error('LINE binding is available only in the Windows development build')),
-      validateWitness: witness => lineWitness ? lineWitness.validateWitness(witness) : Promise.reject(new Error('LINE binding helper unavailable')),
+      listCandidates: () => smokeHooks ? Promise.resolve([fixtureWitness]) : lineWitness ? lineWitness.listCandidates() : Promise.reject(new Error('LINE binding is available only in the Windows development build')),
+      validateWitness: witness => smokeHooks ? Promise.resolve({ ...witness }) : lineWitness ? lineWitness.validateWitness(witness) : Promise.reject(new Error('LINE binding helper unavailable')),
     });
-    const selectionClient = createNativeSelectionClient({
+    const selectionClient = smokeHooks ? null : createNativeSelectionClient({
       binaryPath: path.join(__dirname, '..', 'build', 'bin', 'native-routing', 'ReadOnlyRouting.exe'),
       witnessFor: platform => lineBinding.witnessFor(platform),
     });
     const drafts = createForwardingDrafts({
-      observeSelection: platform => selectionClient.observe(platform),
+      observeSelection: platform => smokeHooks ? smokeHooks.observeSelection(platform) : selectionClient.observe(platform),
       ledger: createForwardingLedger(path.join(app.getPath('userData'), 'forwarding-ledger')),
       // No verified personal-chat UI adapter is registered yet.
     });
-    registerForwardingIpc(ipcMain, () => mainWindow, pathToFileURL(path.join(__dirname, 'shell.html')).href, drafts, lineBinding);
+    const selectionArming = createSelectionArming({
+      register: (accelerator, callback) => smokeHooks ? smokeHooks.registerShortcut(accelerator, callback) : globalShortcut.register(accelerator, callback),
+      unregister: accelerator => smokeHooks ? smokeHooks.unregisterShortcut(accelerator) : globalShortcut.unregister(accelerator),
+      isBound: async () => Boolean(await lineBinding.witnessFor('line')),
+      capture: input => drafts.captureObservedSelection(input),
+      onResult: result => { if (!closing && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('crosschat:selection-observed', result); },
+    });
+    cancelSelectionArm = () => selectionArming.close();
+    registerForwardingIpc(ipcMain, () => mainWindow, pathToFileURL(path.join(__dirname, 'shell.html')).href, drafts, lineBinding, selectionArming);
     ipcMain.handle('crosschat:tab-switch', (event, id) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
       chooseTab(id); return true;
