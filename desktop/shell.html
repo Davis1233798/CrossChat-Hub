@@ -10,7 +10,7 @@
 </head>
 <body>
 <div class="chrome">
-  <div class="app-title"><span class="logo">↔</span><b>CrossChat Hub</b><span class="build">多平台桌面工作區 · 預覽版（LINE 未完成）</span></div>
+  <div class="app-title"><span class="logo">↔</span><b>CrossChat Hub</b><span class="build">多平台桌面工作區 · Windows LINE 實驗功能</span></div>
   <nav aria-label="聊天平台" id="tabs">
     <button type="button" class="tab selected" data-tab="telegram" aria-selected="true" role="tab">Telegram</button>
     <button type="button" class="tab" data-tab="discord" aria-selected="false" role="tab">Discord</button>
@@ -36,9 +36,11 @@
 <main id="native-content" aria-live="polite">
   <section id="line" class="native-panel" hidden>
     <div class="mark">LINE</div>
-    <h1>LINE 個人聊天尚無法內嵌</h1>
-    <p>LINE 官方在 Windows／macOS 提供桌面應用程式，以及 Google Chrome 專用的 LINE 擴充功能；沒有可安全直接載入的標準網頁聊天網址。Electron 無法保證相容 Chrome 商店擴充功能。</p>
-    <p><strong>此分頁目前不能收發 LINE 私人訊息。</strong> 不會要求在非官方表單中輸入 LINE 密碼，也不會假裝 LINE Login 等同個人聊天登入。</p>
+    <h1>連結已登入的官方 LINE 桌面視窗</h1>
+    <p>先列出並明確綁定你確認已登入的官方 LINE 主視窗，再按下方按鈕啟用。啟用後 LINE 會顯示在工作區右側，Hub 和完整輸入區保留在左側。</p>
+    <p><strong>實驗功能：</strong>強制結束 CrossChat 或原生 broker 可能讓 LINE 視窗暫時離開原本視窗位置；此功能不會關閉或終止 LINE。正常結束會先要求還原並讀回確認，未確認時會保持視窗開啟以便重試。</p>
+    <div class="buttons"><button id="line-enable" type="button">啟用 LINE 實驗功能</button><button id="line-restore" type="button" class="secondary" hidden>還原 LINE 並解除附掛</button></div>
+    <p id="line-native-status" role="status">尚未啟用；列出或綁定不會移動 LINE 視窗。</p>
     <div class="buttons"><button type="button" data-line-link="desktop">開啟 LINE 官方下載</button><button type="button" data-line-link="chrome" class="secondary">開啟官方 Chrome 擴充功能</button></div>
     <div id="line-binding" class="line-binding">
       <h2>選擇已登入的 LINE 主視窗</h2>

@@ -38,4 +38,6 @@ contextBridge.exposeInMainWorld('crosschatDesktop', Object.freeze({
   listLineCandidates: () => ipcRenderer.invoke('crosschat:line-bind-list'),
   bindLineCandidate: input => ipcRenderer.invoke('crosschat:line-bind-confirm', input),
   unbindLine: () => ipcRenderer.invoke('crosschat:line-bind-clear'),
+  enableNativeLine: () => ipcRenderer.invoke('crosschat:line-enable'),
+  restoreNativeLine: () => ipcRenderer.invoke('crosschat:line-restore'),
 }));

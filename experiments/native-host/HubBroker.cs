@@ -9,7 +9,7 @@ using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
-// Developer study: receives ONLY the launching Hub HWND over private stdin.
+// Receives only the launching Hub HWND and bounded commands over private stdin.
 // It has no socket, arbitrary binary launch or existing-chat attach interface.
 internal static class HubBroker {
   [DllImport("user32.dll")] static extern IntPtr SetParent(IntPtr child, IntPtr parent);
@@ -42,6 +42,9 @@ internal static class HubBroker {
   static bool hubChanged,chatChanged,hubVisible,hubRestored,rollbackAttempted,rollbackVerified;
   static readonly List<string> rollbackOrder=new List<string>();
   static Form root; static Panel pane; static Label status;
+#if LINE_PRODUCT
+  static Button lineRecoveryButton;
+#endif
   static bool attached, finish, closingRequested, resized, rootSurvived, chatSurvived, chatRestored, chatClosed, controllerExited, dpiEqual;
   static string error;
   static bool mixed; static int previousHosting=-1, rootHosting=-1,paneHosting=-1;
@@ -51,11 +54,17 @@ internal static class HubBroker {
   static int hubMinimumWidth,hubMinimumHeight;
   static Rect LocalBounds(IntPtr window) { Rect rect;if(!GetWindowRect(window,out rect))throw new Exception("Cannot read child bounds");MapWindowPoints(IntPtr.Zero,pane.Handle,ref rect,2);return rect; }
   static object BoundsRecord(Rect r) {return new { left=r.Left,top=r.Top,width=r.Right-r.Left,height=r.Bottom-r.Top };}
-#if LINE_STUDY
+#if LINE_STUDY || LINE_PRODUCT
   static readonly Stopwatch lineDeadline=new Stopwatch();
   static Rect lineOriginalBounds;
+#endif
+#if LINE_STUDY
   static bool lineDetachedSent;
+#endif
+#if LINE_STUDY || LINE_PRODUCT
   static bool LineAlive { get { return Alive(fixture,fixtureStart,chat); } }
+#endif
+#if LINE_STUDY
   static void DetachLine() {
     if(lineDetachedSent)return;
     try { RestoreFixture(); }
@@ -66,9 +75,16 @@ internal static class HubBroker {
     if(chatRestored)lineDetachedSent=true;
   }
 #endif
+  static bool lineAttached, lineVisible;
+#if LINE_PRODUCT
+  static long lastSequence, currentSequence;
+#endif
   static void Trace(string stage) { File.AppendAllText(resultPath+".trace",DateTime.UtcNow.ToString("O")+" "+stage+Environment.NewLine); }
   static void Emit(string type, params object[] fields) {
     var record=new Dictionary<string,object> { {"v",1},{"nonce",nonce},{"type",type} };
+#if LINE_PRODUCT
+    record["sequence"]=currentSequence;
+#endif
     for(int i=0;i<fields.Length;i+=2)record[(string)fields[i]]=fields[i+1];
     try { Console.WriteLine(json.Serialize(record)); Console.Out.Flush(); } catch(IOException) {}
   }
@@ -80,12 +96,25 @@ internal static class HubBroker {
 #if LINE_STUDY
     if(chatRestored)return;
 #endif
-    if(!attached || finish || !Alive(controller,controllerStart,hub) || !Alive(fixture,fixtureStart,chat))return;
+    if(!attached || finish || !Alive(controller,controllerStart,hub))return;
+#if LINE_PRODUCT
+    if(!lineAttached || !lineVisible) {
+      if(!MoveWindow(hub,0,0,Math.Max(1,pane.ClientSize.Width),Math.Max(1,pane.ClientSize.Height),true))throw new Exception("Hub layout failed");
+      if(lineAttached)ShowWindow(chat,0);
+      return;
+    }
+#endif
+    if(!Alive(fixture,fixtureStart,chat))return;
     // GetClientRect and MoveWindow both use the native physical coordinate
     // space of this PerMonitor process. Electron handles its own child DIP UI.
     Rect r; GetClientRect(pane.Handle,out r); int width=r.Right-r.Left,height=r.Bottom-r.Top;
     if(height<hubMinimumHeight)throw new Exception("Native pane is shorter than Hub minimum height");
-    int chatWidth=360;
+    int chatWidth=
+#if LINE_PRODUCT
+      Math.Min(Math.Max(1,width/2),Math.Max(1,width-hubMinimumWidth));
+#else
+      360;
+#endif
     for(int attempt=0;attempt<3;attempt++) {
       int left=width-chatWidth;
       if(left<hubMinimumWidth||chatWidth<1)throw new Exception("Native child minimum dimensions exceed available pane");
@@ -111,7 +140,7 @@ internal static class HubBroker {
     var actual=PlacementOf(chat);
     fixtureDpiRestored=DpiName(chat);
     chatRestored=GetParent(chat)==chatParent && GetStyle(chat,-16)==chatStyle && actual.Normal.Equals(chatPlacement.Normal) && actual.ShowCmd==chatPlacement.ShowCmd && IsWindowVisible(chat) && fixtureDpiRestored==fixtureDpiBefore;
-#if LINE_STUDY
+#if LINE_STUDY || LINE_PRODUCT
     Rect bounds;GetWindowRect(chat,out bounds);chatRestored=chatRestored&&bounds.Equals(lineOriginalBounds);
     // This is the user's LINE process. NEVER close or terminate it.
 #else
@@ -136,7 +165,7 @@ internal static class HubBroker {
     // is still attached to it, even when attachment never reached 'attached'.
     if(chatChanged) { rollbackOrder.Add("fixture"); try { RestoreFixture(); }catch(Exception ex){Trace("fixture rollback error "+ex.Message);} }
     else if(fixture!=null && Alive(fixture,fixtureStart,chat)) {
-#if LINE_STUDY
+#if LINE_STUDY || LINE_PRODUCT
       chatRestored=true;
 #else
       fixture.CloseMainWindow(); chatClosed=fixture.WaitForExit(5000);
@@ -145,6 +174,8 @@ internal static class HubBroker {
     if(hubChanged) { rollbackOrder.Add("hub"); try { hubRestored=RestoreHub(); }catch(Exception ex){Trace("Hub rollback error "+ex.Message);} }
     rollbackVerified=(!chatChanged||chatRestored)&&(!hubChanged||hubRestored)
 #if LINE_STUDY
+      &&(fixture==null||LineAlive);
+#elif LINE_PRODUCT
       &&(fixture==null||LineAlive);
 #else
       &&(fixture==null||chatClosed);
@@ -155,10 +186,110 @@ internal static class HubBroker {
     if(finish)return;
     rootSurvived=IsWindow(root.Handle)&&GetParent(root.Handle)==IntPtr.Zero;
     controllerExited=controller.HasExited;
+#if LINE_PRODUCT
+    if(chatChanged&&!chatRestored) { try { RestoreFixture(); } catch(Exception ex) { error="LINE recovery failed: "+ex.Message; } }
+    if(chatRestored) { lineAttached=false;lineVisible=false;chatChanged=false; }
+    try { hubRestored=RestoreHub(); } catch(Exception ex) { error="Hub recovery failed: "+ex.Message; }
+    finish=true;
+    if(!chatRestored && lineAttached) { error=error??"LINE may still be attached. Use the broker recovery button; do not force close this window."; if(lineRecoveryButton!=null)lineRecoveryButton.Visible=true; }
+    status.Text=chatRestored ? "LINE restoration verified. Hub controller exited." : "LINE restoration is unverified. Keep this window open and retry.";
+    Save();
+    if(chatRestored||!chatChanged)root.Close();
+#else
     RestoreFixture(); finish=true;
     status.Text="Controller exited. Fixture restored: "+chatRestored+". Broker root survived: "+rootSurvived;
     Save(); if(mode!="manual" || closingRequested)root.Close();
+#endif
   }
+#if LINE_PRODUCT
+  static void AttachProductLine(Dictionary<string,object> d) {
+    if(d.Count!=5 || !d.ContainsKey("sequence") ||
+#if LINE_PRODUCT_FIXTURE
+      !d.ContainsKey("fixture") || !Convert.ToBoolean(d["fixture"])
+#else
+      !d.ContainsKey("lineWitness")
+#endif
+      )throw new Exception("Invalid LINE attach request");
+    if(lineAttached)throw new Exception("LINE is already attached");
+    if(fixture!=null)fixture.Dispose();
+#if LINE_PRODUCT_FIXTURE
+    if(!d.ContainsKey("fixture") || Convert.ToBoolean(d["fixture"])!=true)throw new Exception("Owned fixture mode requires explicit fixture=true");
+    fixture=Process.Start(new ProcessStartInfo(Application.ExecutablePath,"--fixture "+nonce) { UseShellExecute=false,CreateNoWindow=false });
+    for(int i=0;i<100;i++) { fixture.Refresh(); chat=fixture.MainWindowHandle; if(chat!=IntPtr.Zero)break; Thread.Sleep(50); }
+    chatRestored=false;fixtureStart=fixture.StartTime.ToUniversalTime().Ticks;
+#else
+    if(!d.ContainsKey("lineWitness"))throw new Exception("LINE witness is required");
+    chatRestored=false;fixture=LineWitness.Validate((Dictionary<string,object>)d["lineWitness"],out chat);fixtureStart=fixture.StartTime.ToUniversalTime().Ticks;
+#endif
+    if(!Alive(fixture,fixtureStart,chat))throw new Exception("LINE window identity changed");
+    chatParent=GetParent(chat);chatStyle=GetStyle(chat,-16);chatPlacement=PlacementOf(chat);GetWindowRect(chat,out lineOriginalBounds);
+    fixtureDpiBefore=DpiName(chat);chatChanged=true;
+    try {
+      SetStyle(chat,-16,new IntPtr((chatStyle.ToInt64()|0x40000000L)&~0x80000000L));SetParent(chat,pane.Handle);
+      fixtureDpiAfter=DpiName(chat);
+      if(fixtureDpiAfter!="context-4" || GetParent(chat)!=pane.Handle || GetAncestor(chat,2)!=root.Handle)throw new Exception("LINE native parent or DPI verification failed");
+      lineAttached=true;lineVisible=true;Layout();ShowWindow(chat,5);SetFocus(chat);Trace("product show visible="+IsWindowVisible(chat)+" root="+IsWindowVisible(root.Handle)+" pane="+IsWindowVisible(pane.Handle));
+      if(!LayoutProductVerified())throw new Exception("LINE side-by-side layout read-back failed");
+      Emit("line-attached","attached",true,"alive",LineAlive);
+    } catch(Exception ex) {
+      Trace("LINE attach rejected: "+ex.Message);
+      try { RestoreFixture(); } catch {}
+      if(chatRestored) { lineAttached=false;lineVisible=false;chatChanged=false; }
+      else if(lineRecoveryButton!=null)lineRecoveryButton.Visible=true;
+      Emit(chatRestored?"line-attach-failed":"line-restore-failed","restored",chatRestored,"alive",LineAlive,"message",ex.Message);
+    }
+  }
+  static bool LayoutProductVerified() {
+    Rect paneRect, hubRect, lineRect;GetClientRect(pane.Handle,out paneRect);GetWindowRect(hub,out hubRect);GetWindowRect(chat,out lineRect);
+    var h=LocalBounds(hub);var l=LocalBounds(chat);
+    bool parents=GetParent(hub)==pane.Handle&&GetParent(chat)==pane.Handle&&GetAncestor(hub,2)==root.Handle&&GetAncestor(chat,2)==root.Handle;
+    bool edges=h.Left==0&&h.Top==0&&h.Right==l.Left&&l.Right==paneRect.Right&&h.Bottom==paneRect.Bottom&&l.Bottom==paneRect.Bottom&&l.Left>=hubMinimumWidth;
+    bool visible=IsWindowVisible(chat);
+    if(!parents||!edges||!visible)Trace("product layout readback failed parents="+parents+" edges="+edges+" visible="+visible+" rootVisible="+IsWindowVisible(root.Handle)+" paneVisible="+IsWindowVisible(pane.Handle)+" style="+GetStyle(chat,-16).ToInt64().ToString("x")+" hubMinimum="+hubMinimumWidth);
+    return visible&&parents&&edges;
+  }
+  static bool LayoutProductHiddenVerified() {
+    Rect paneRect;GetClientRect(pane.Handle,out paneRect);var h=LocalBounds(hub);
+    bool verified=!IsWindowVisible(chat)&&GetParent(hub)==pane.Handle&&GetAncestor(hub,2)==root.Handle&&h.Left==0&&h.Top==0&&h.Right==paneRect.Right&&h.Bottom==paneRect.Bottom;
+    if(!verified)Trace("product hidden layout readback failed visible="+IsWindowVisible(chat)+" hubParent="+(GetParent(hub)==pane.Handle)+" hubRoot="+(GetAncestor(hub,2)==root.Handle));
+    return verified;
+  }
+  static void SetProductLineVisible(Dictionary<string,object> d,bool visible) {
+    if(d.Count!=4||!d.ContainsKey("sequence")||!lineAttached||!LineAlive)throw new Exception("LINE is not attached");
+    lineVisible=visible;
+    if(visible)ShowWindow(chat,5);else ShowWindow(chat,0);
+    Layout();
+    Emit("line-visibility","visible",visible,"verified",visible?LayoutProductVerified():LayoutProductHiddenVerified());
+  }
+  static void DetachProductLine(Dictionary<string,object> d) {
+    if(d.Count!=4||!d.ContainsKey("sequence"))throw new Exception("Invalid LINE detach request");
+    if(!lineAttached) { Emit("line-detached","restored",true,"alive",true);return; }
+    try { RestoreFixture(); } catch(Exception ex) { error="LINE restore failed: "+ex.Message; }
+    bool aliveAfterRestore=LineAlive;
+    if(chatRestored) { lineAttached=false;lineVisible=false;chatChanged=false;fixture.Dispose();fixture=null;chat=IntPtr.Zero;error=null;Layout(); }
+    else { error=error??"LINE restoration read-back did not match the saved window state."; if(lineRecoveryButton!=null)lineRecoveryButton.Visible=true; }
+    Emit(chatRestored?"line-detached":"line-restore-failed","restored",chatRestored,"alive",aliveAfterRestore,"message",error??"");
+  }
+  static void DetachProductHost(Dictionary<string,object> d) {
+    if(d.Count!=4||!d.ContainsKey("sequence"))throw new Exception("Invalid detach-host request");
+    if(lineAttached) {
+      try { RestoreFixture(); } catch(Exception ex) { error="LINE restore failed: "+ex.Message; }
+      if(!chatRestored) { error=error??"LINE restoration read-back did not match the saved window state.";if(lineRecoveryButton!=null)lineRecoveryButton.Visible=true;Emit("line-restore-failed","restored",false,"alive",LineAlive,"message",error);return; }
+      lineAttached=false;lineVisible=false;chatChanged=false;
+    }
+#if LINE_PRODUCT_FIXTURE
+    if(fixture!=null&&chatRestored) { try { fixture.CloseMainWindow();fixture.WaitForExit(5000); } catch {} fixture.Dispose();fixture=null;chat=IntPtr.Zero; }
+#else
+    if(fixture!=null&&chatRestored) { fixture.Dispose();fixture=null;chat=IntPtr.Zero; }
+#endif
+    bool restoredHub=false;
+    try { restoredHub=RestoreHub(); } catch(Exception ex) { error="Hub restore failed: "+ex.Message; }
+    if(!restoredHub) { error=error??"Hub restoration read-back did not match the saved window state.";Emit("host-restore-failed","restored",false,"message",error);return; }
+    hubChanged=false;finish=true;closingRequested=true;
+    Emit("host-detached","restored",true,"lineAlive",true);
+    root.Close();
+  }
+#endif
   static void Save() {
     File.WriteAllText(resultPath,new JavaScriptSerializer { MaxJsonLength=65536,RecursionLimit=8 }.Serialize(new Dictionary<string,object> {
       {"attached",attached},{"sameRootAtAttach",attached},{"dpiAwarenessEqual",dpiEqual},{"resizeVerified",resized},
@@ -184,8 +315,14 @@ internal static class HubBroker {
   static void Fail(string message) {
     if(finish)return;
     error=message; Rollback(); finish=true;
+#if LINE_PRODUCT
+    if(chatChanged&&!chatRestored&&lineRecoveryButton!=null)lineRecoveryButton.Visible=true;
+#endif
     status.Text=message+"; rollback verified: "+rollbackVerified;
     Save(); Emit("error","message",message,"rollbackVerified",rollbackVerified);
+#if LINE_PRODUCT
+    if(rollbackVerified)root.Close();
+#endif
     // Keep root alive until controller consumes the failure acknowledgement
     // and exits. Closing it here can race Electron's close lifecycle and
     // return an incorrect startup exit code 0.
@@ -201,15 +338,24 @@ internal static class HubBroker {
     if(d==null || d.Count>
 #if LINE_STUDY
       8
+#elif LINE_PRODUCT
+      8
 #else
       7
 #endif
       || !d.ContainsKey("v") || Convert.ToInt32(d["v"])!=1 || !d.ContainsKey("nonce") || (string)d["nonce"]!=nonce || !d.ContainsKey("type"))throw new Exception("Invalid broker envelope");
+#if LINE_PRODUCT
+    long incomingSequence;
+    if(!d.ContainsKey("sequence")||!Int64.TryParse(Convert.ToString(d["sequence"]),out incomingSequence)||incomingSequence<=0||incomingSequence!=lastSequence+1)throw new Exception("Invalid broker command sequence");
+    lastSequence=incomingSequence;currentSequence=incomingSequence;
+#endif
     string type=(string)d["type"];
     Trace("command "+type);
     if(type=="attach" && !attached) {
       if(d.Count!=
 #if LINE_STUDY
+        8
+#elif LINE_PRODUCT
         8
 #else
         7
@@ -219,6 +365,13 @@ internal static class HubBroker {
       if(minima==null||minima.Count!=2||!minima.ContainsKey("width")||!minima.ContainsKey("height")||!(minima["width"] is int)||!(minima["height"] is int))throw new Exception("Invalid main-owned Hub minima");
       hubMinimumWidth=(int)minima["width"];hubMinimumHeight=(int)minima["height"];
       if(hubMinimumWidth<1||hubMinimumWidth>8192||hubMinimumHeight<1||hubMinimumHeight>8192)throw new Exception("Hub minima outside bounded range");
+#if LINE_PRODUCT
+      root.PerformLayout();
+      int productMinimumWidth=checked(hubMinimumWidth*2+(root.Width-root.ClientSize.Width));
+      int productMinimumHeight=checked(hubMinimumHeight+(root.Height-pane.ClientSize.Height));
+      root.MinimumSize=new Size(productMinimumWidth,productMinimumHeight);
+      if(root.Width<productMinimumWidth||root.Height<productMinimumHeight)root.Size=new Size(Math.Max(root.Width,productMinimumWidth),Math.Max(root.Height,productMinimumHeight));
+#endif
       long raw; if(!long.TryParse((string)d["hwnd"],out raw)||raw<=0)throw new Exception("Invalid HWND"); hub=new IntPtr(raw);
       if(!Alive(controller,controllerStart,hub)||GetParent(hub)!=IntPtr.Zero)throw new Exception("Hub HWND ownership/root mismatch");
       dpiEqual=AreDpiAwarenessContextsEqual(GetWindowDpiAwarenessContext(hub),GetWindowDpiAwarenessContext(root.Handle));
@@ -231,36 +384,66 @@ internal static class HubBroker {
       if(!mixed||injection!="none"||mode!="manual")throw new Exception("Real LINE study only supports normal manual mixed hosting");
       fixture=LineWitness.Validate((Dictionary<string,object>)d["lineWitness"],out chat);fixtureStart=fixture.StartTime.ToUniversalTime().Ticks;
       if(lineDeadline.ElapsedMilliseconds>8000)throw new Exception("LINE witness was too slow; refusing attachment");
+#elif LINE_PRODUCT
+      if(!mixed||injection!="none"||mode!="manual")throw new Exception("Product LINE host requires mixed normal mode");
 #else
       fixture=Process.Start(new ProcessStartInfo(Application.ExecutablePath,"--fixture "+nonce) { UseShellExecute=false }); fixtureStart=fixture.StartTime.ToUniversalTime().Ticks;
       for(int i=0;i<100;i++) { fixture.Refresh(); chat=fixture.MainWindowHandle; if(chat!=IntPtr.Zero)break; Thread.Sleep(50); }
 #endif
+#if !LINE_PRODUCT
       if(!Alive(fixture,fixtureStart,chat))throw new Exception("Owned fixture has no HWND");
       chatParent=GetParent(chat); chatStyle=GetStyle(chat,-16); chatPlacement=PlacementOf(chat);
-#if LINE_STUDY
-      GetWindowRect(chat,out lineOriginalBounds);
 #endif
+#if LINE_STUDY || LINE_PRODUCT
+      if(fixture!=null) {
+      GetWindowRect(chat,out lineOriginalBounds);
       fixtureDpiBefore=DpiName(chat);
       if(mixed&&fixtureDpiBefore!="context-4")throw new Exception("Owned fixture is not PMv2");
+      }
+#endif
       hubChanged=true; SetStyle(hub,-16,new IntPtr((hubStyle.ToInt64()|0x40000000L)&~0x80000000L)); SetParent(hub,pane.Handle); Inject("after-hub-parent");
       hubDpiAfter=DpiName(hub);
+      Trace("hub parent set rootVisible="+IsWindowVisible(root.Handle)+" paneVisible="+IsWindowVisible(pane.Handle)+" hubVisible="+IsWindowVisible(hub));
       if(hubDpiAfter!=hubDpiBefore)throw new Exception("Hub DPI changed during parenting");
+#if !LINE_PRODUCT
       chatChanged=true; SetStyle(chat,-16,new IntPtr((chatStyle.ToInt64()|0x40000000L)&~0x80000000L)); SetParent(chat,pane.Handle); Inject("after-fixture-parent");
       fixtureDpiAfter=DpiName(chat);
       if(fixtureDpiAfter!=fixtureDpiBefore)throw new Exception("Fixture DPI changed during parenting");
       if(GetParent(hub)!=pane.Handle || GetParent(chat)!=pane.Handle || GetAncestor(hub,2)!=root.Handle || GetAncestor(chat,2)!=root.Handle)throw new Exception("Shared broker root verification failed");
+#else
+      if(GetParent(hub)!=pane.Handle || GetAncestor(hub,2)!=root.Handle)throw new Exception("Hub broker root verification failed");
+#endif
       attached=true; Layout(); Inject("after-resize"); status.Text=
 #if LINE_STUDY
       "Real LINE window temporarily embedded. Automatic detach within 20 seconds; no messaging operations.";
+#elif LINE_PRODUCT
+      "Hub is hosted; LINE remains outside until explicitly enabled.";
 #else
       "Isolated actual Hub + owned synthetic chat. No LINE account attached.";
 #endif
-      Trace("attached root="+root.Handle+" brokerPid="+Process.GetCurrentProcess().Id+" fixturePid="+fixture.Id); Emit("attached","rootHwnd",root.Handle.ToInt64().ToString()); Save();
-    } else if(type=="shutdown" && d.Count==3) { closingRequested=true;
+      Trace("attached root="+root.Handle+" brokerPid="+Process.GetCurrentProcess().Id+(fixture==null?"":" fixturePid="+fixture.Id)); Emit("attached","rootHwnd",root.Handle.ToInt64().ToString()); Save();
+    } else if(type=="shutdown" && d.Count==
+#if LINE_PRODUCT
+      4
+#else
+      3
+#endif
+      ) { closingRequested=true;
 #if LINE_STUDY
       DetachLine();
 #endif
-      status.Text="Waiting for Hub session flush and exit; broker stays alive."; }
+      status.Text="Waiting for Hub session flush and exit; broker stays alive.";
+#if LINE_PRODUCT
+      Emit("shutdown-ack","accepted",true);
+#endif
+    }
+#if LINE_PRODUCT
+    else if(type=="line-attach") { AttachProductLine(d); }
+    else if(type=="line-detach") { DetachProductLine(d); }
+    else if(type=="line-show") { SetProductLineVisible(d,true); }
+    else if(type=="line-hide") { SetProductLineVisible(d,false); }
+    else if(type=="detach-host") { DetachProductHost(d); }
+#endif
     else if(type=="resize-check" && d.Count==3 && attached) {
       root.Size=new Size(root.Width+80,root.Height+40); Layout();
       Rect a,b,c; GetClientRect(pane.Handle,out a); GetWindowRect(hub,out b); GetWindowRect(chat,out c);
@@ -271,19 +454,32 @@ internal static class HubBroker {
   }
   [STAThread] static int Main(string[] args) {
     Application.EnableVisualStyles();
+    chatClosed=false;
     if(args.Length==2 && args[0]=="--fixture" && Regex.IsMatch(args[1],"^[a-f0-9]{48}$")) {
       int minimumWidth=0;string minimum=Environment.GetEnvironmentVariable("CROSSCHAT_BROKER_OWNED_MIN_WIDTH");
       if(minimum!=null&&(!int.TryParse(minimum,out minimumWidth)||minimumWidth<128||minimumWidth>1600))return 2;
       Application.Run(new Form { Text="Owned synthetic native chat",Width=360,Height=450,MinimumSize=new Size(minimumWidth,0),Controls={ new Label { Text="Native chat fixture\n\nNo LINE or Chrome process.\n\nThis HWND is a sibling of the actual Hub.\nBroker owns the shared top-level root.",Dock=DockStyle.Fill,Padding=new Padding(20),Font=new Font("Segoe UI",12) } } }); return 0;
     }
     int pid;
-    if(args.Length!=6 || !int.TryParse(args[0],out pid) || pid<=0 || !Regex.IsMatch(args[1],"^[a-f0-9]{48}$") || !Path.IsPathRooted(args[2]) || Path.GetFileName(args[2])!="broker-result.json" || !Path.GetFileName(Path.GetDirectoryName(args[2])).StartsWith("crosschat-broker-hub-") || (args[3]!="normal"&&args[3]!="crash"&&args[3]!="manual") || !Regex.IsMatch(args[4],"^(none|after-hub-parent|after-fixture-parent|after-resize|stdio-eof)$") || (args[5]!="strict-v1"&&args[5]!="mixed-v2"))return 2;
+    if(args.Length!=6 || !int.TryParse(args[0],out pid) || pid<=0 || !Regex.IsMatch(args[1],"^[a-f0-9]{48}$") || !Path.IsPathRooted(args[2]) || Path.GetFileName(args[2])!="broker-result.json" ||
+#if LINE_PRODUCT
+      !Path.GetFileName(Path.GetDirectoryName(args[2])).StartsWith("crosschat-native-line-") ||
+#else
+      !Path.GetFileName(Path.GetDirectoryName(args[2])).StartsWith("crosschat-broker-hub-") ||
+#endif
+      (args[3]!="normal"&&args[3]!="crash"&&args[3]!="manual") || !Regex.IsMatch(args[4],"^(none|after-hub-parent|after-fixture-parent|after-resize|stdio-eof)$") || (args[5]!="strict-v1"&&args[5]!="mixed-v2"))return 2;
     nonce=args[1];resultPath=args[2];mode=args[3];injection=args[4]; controller=Process.GetProcessById(pid); controllerStart=controller.StartTime.ToUniversalTime().Ticks;
     mixed=args[5]=="mixed-v2";
     if(mixed) { try { previousHosting=SetThreadDpiHostingBehavior(1); }catch(EntryPointNotFoundException){return 3;} if(previousHosting==-1)return 3; }
     AppDomain.CurrentDomain.UnhandledException+=delegate(object s,UnhandledExceptionEventArgs e){Trace("unhandled "+e.ExceptionObject);};
     Trace("start brokerPid="+Process.GetCurrentProcess().Id+" controller="+pid);
-    root=new Form { Text="CrossChat broker — isolated actual Hub study",Width=1660,Height=900,MinimumSize=new Size(1400,700),StartPosition=FormStartPosition.CenterScreen };
+    root=new Form { Text=
+#if LINE_PRODUCT
+      "CrossChat Hub — native LINE host",
+#else
+      "CrossChat broker — isolated actual Hub study",
+#endif
+      Width=1660,Height=900,MinimumSize=new Size(1400,700),StartPosition=FormStartPosition.CenterScreen };
     status=new Label { Dock=DockStyle.Top,Height=34,Text="Waiting for isolated Hub handshake",Padding=new Padding(6) };
     var toolbar=new FlowLayoutPanel { Dock=DockStyle.Top,Height=36 };
     var focusHub=new Button { Text="Focus Hub",Width=120 }; focusHub.Click+=delegate { if(attached&&!finish)Emit("focus-hub"); };
@@ -293,6 +489,15 @@ internal static class HubBroker {
     focusChat.Visible=false;
     var detach=new Button { Text="Detach LINE now",Width=150 };detach.Click+=delegate {DetachLine();};toolbar.Controls.Add(detach);
     root.Text="CrossChat broker — temporary LINE study";
+#endif
+#if LINE_PRODUCT
+    lineRecoveryButton=new Button { Text="Retry LINE restoration",Width=190,Visible=false };
+    lineRecoveryButton.Click+=delegate {
+      try { RestoreFixture(); } catch(Exception ex) { error="LINE recovery failed: "+ex.Message; }
+      if(chatRestored) { lineAttached=false;lineVisible=false;chatChanged=false;error=null;status.Text="LINE restoration verified.";Save(); if(controller.HasExited)root.Close();else Layout(); }
+      else status.Text="LINE restoration is unverified. Keep this window open and retry.";
+    };
+    toolbar.Controls.Add(lineRecoveryButton);
 #endif
     pane=new Panel { Dock=DockStyle.Fill }; root.Controls.Add(pane);root.Controls.Add(status);root.Controls.Add(toolbar);
     // Force creation of both native parent HWNDs while MIXED is active, then
@@ -304,6 +509,8 @@ internal static class HubBroker {
       if(error!=null && !rollbackVerified && ((IsWindow(hub)&&GetAncestor(hub,2)==root.Handle)||(IsWindow(chat)&&GetAncestor(chat,2)==root.Handle))) { e.Cancel=true; return; }
 #if LINE_STUDY
       if(!chatRestored&&chatChanged) {e.Cancel=true;DetachLine();return;}
+#elif LINE_PRODUCT
+      if(chatChanged&&!chatRestored) {e.Cancel=true;status.Text="LINE is not restored. Keep this root open and retry LINE restoration.";return;}
 #endif
       if(!finish && !controller.HasExited) { e.Cancel=true; if(!closingRequested){closingRequested=true;Emit("close-request");} }
     };
@@ -317,6 +524,8 @@ internal static class HubBroker {
       if(!finish && controller.HasExited) { try { Complete(); } catch(Exception ex){Fail(ex.Message);} }
     };
     root.Shown+=delegate {
+      ShowWindow(root.Handle,5);ShowWindow(pane.Handle,5);
+      Trace("root shown event visible="+IsWindowVisible(root.Handle)+" paneVisible="+IsWindowVisible(pane.Handle)+" managedVisible="+root.Visible);
 #if LINE_STUDY
       lineDeadline.Start();
 #endif
@@ -328,7 +537,11 @@ internal static class HubBroker {
         root.BeginInvoke((Action)delegate { if(!finish&&!closingRequested)Fail("Broker stdin EOF"); });
       } catch(Exception ex) { try { root.BeginInvoke((Action)delegate { Fail(ex.Message); }); }catch(InvalidOperationException){} } }) { IsBackground=true }.Start();
     };
-    Application.Run(root);timer.Dispose();controller.Dispose();if(fixture!=null)fixture.Dispose();
+    Application.Run(root);timer.Dispose();controller.Dispose();
+#if LINE_PRODUCT_FIXTURE
+    if(fixture!=null&&chatRestored&&!fixture.HasExited) { try { fixture.CloseMainWindow();fixture.WaitForExit(5000); } catch {} }
+#endif
+    if(fixture!=null)fixture.Dispose();
     return error==null ? 0 : 1;
   }
 }

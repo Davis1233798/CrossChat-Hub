@@ -6,6 +6,7 @@ function nativeHelperPaths({ isPackaged, resourcesPath, appPath }) {
   const root = isPackaged ? path.join(resourcesPath, 'native') : path.join(appPath, 'build', 'bin');
   return Object.freeze({
     lineWitness: path.join(root, isPackaged ? 'LineWitness.exe' : path.join('native-host', 'LineWitness.exe')),
+    lineBroker: path.join(root, isPackaged ? 'ProductBroker.exe' : path.join('native-host', 'ProductBroker.exe')),
     readOnlyRouting: path.join(root, isPackaged ? 'ReadOnlyRouting.exe' : path.join('native-routing', 'ReadOnlyRouting.exe')),
   });
 }

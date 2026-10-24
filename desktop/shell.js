@@ -23,7 +23,7 @@
     }
     line.hidden = id !== 'line';
     connecting.hidden = id === 'line';
-    status.textContent = id === 'line' ? 'LINE：官方個人聊天客戶端無法可靠嵌入 Electron' : `${id} · 官方網頁版 · 登入會話保留在此電腦`;
+    status.textContent = id === 'line' ? 'LINE：Windows 原生視窗實驗功能，需明確綁定並啟用' : `${id} · 官方網頁版 · 登入會話保留在此電腦`;
     if (notify) window.crosschatDesktop.switchTab(id).catch(() => { status.textContent = '分頁載入失敗'; });
     document.getElementById('slack-account-controls').hidden = id !== 'slack';
     slackDestinationPanel.hidden = id !== 'slack';
@@ -95,6 +95,32 @@
   const lineCandidateList = document.getElementById('line-candidate-list');
   const lineBindingStatus = document.getElementById('line-binding-status');
   const lineUnbind = document.getElementById('line-unbind');
+  const lineNativeStatus = document.getElementById('line-native-status');
+  const lineRestore = document.getElementById('line-restore');
+  const lineEnable = document.getElementById('line-enable');
+  let lineNativeBusy = false;
+  lineEnable.addEventListener('click', async () => {
+    if (lineNativeBusy) return;
+    lineNativeBusy = true; lineEnable.disabled = true;
+    lineNativeStatus.textContent = '正在驗證已綁定的 LINE 視窗並準備附掛…';
+    try {
+      const result = await window.crosschatDesktop.enableNativeLine();
+      lineNativeStatus.textContent = result.state === 'enabled' ? 'LINE 已啟用。切換其他平台時會隱藏，返回 LINE 時會重新顯示。' : result.detail || '目前無法啟用 LINE。';
+      lineRestore.hidden = ['unbound', 'unavailable', 'inactive'].includes(result.state);
+    } catch { lineNativeStatus.textContent = '啟用未完成；請確認綁定仍有效後重試。'; }
+    finally { lineNativeBusy = false; lineEnable.disabled = false; }
+  });
+  lineRestore.addEventListener('click', async () => {
+    if (lineNativeBusy) return;
+    lineNativeBusy = true; lineRestore.disabled = true;
+    lineNativeStatus.textContent = '正在還原 LINE 視窗並確認原始位置…';
+    try {
+      const result = await window.crosschatDesktop.restoreNativeLine();
+      if (result.restored) { lineNativeStatus.textContent = 'LINE 已還原並確認。'; lineRestore.hidden = true; lineEnable.hidden = false; }
+      else lineNativeStatus.textContent = result.detail || '尚未確認還原；請保持視窗開啟並重試。';
+    } catch { lineNativeStatus.textContent = '尚未確認還原；請保持視窗開啟並重試。'; }
+    finally { lineNativeBusy = false; lineRestore.disabled = false; }
+  });
   let lineBindingBusy = false;
   function clearLineCandidates() { lineCandidateList.replaceChildren(); }
   document.getElementById('line-candidates-refresh').addEventListener('click', async () => {
@@ -135,6 +161,21 @@
   });
   window.crosschatDesktop.onTabStatus(({ id, state, detail }) => {
     if (state === 'selected') { select(id, false); return; }
+    if (id === 'line') {
+      if (state === 'native-enabled') {
+        lineNativeStatus.textContent = detail || 'LINE 已啟用。切換其他平台時會隱藏，返回 LINE 時會重新顯示。';
+        lineEnable.hidden = true; lineRestore.hidden = false;
+      } else if (state === 'restore-error' || state === 'error') {
+        lineNativeStatus.textContent = detail || 'LINE 尚未確認還原；請保持視窗開啟並重試。';
+        lineEnable.hidden = true; lineRestore.hidden = false;
+      } else if (state === 'attach-error' || state === 'host-attached') {
+        if (detail) lineNativeStatus.textContent = detail;
+        lineEnable.hidden = false; lineRestore.hidden = false;
+      } else if (state === 'native-ready' || state === 'stopped' || state === 'host-failed-restored') {
+        lineNativeStatus.textContent = detail || '尚未啟用；列出或綁定不會移動 LINE 視窗。';
+        lineEnable.hidden = false; lineRestore.hidden = true;
+      }
+    }
     const tab = tabs.find(t => t.dataset.tab === id);
     if (state === 'title' && tab) {
       const old = tab.querySelector('.unread');
@@ -162,6 +203,9 @@
       cleared: '已清除本機登入資料，請重新登入',
       'reset-error': '清除未完成；此平台暫停載入，請重試',
       unsupported: 'LINE 只能使用官方獨立客戶端或 Chrome 擴充功能',
+      'native-ready': '已選取 LINE 分頁；LINE 尚未附掛',
+      'native-enabled': 'LINE 原生視窗已附掛並啟用',
+      'restore-error': 'LINE 尚未確認還原；請保持視窗開啟並重試',
     };
     status.textContent = `${id} · ${labels[state] ?? state}`;
   });

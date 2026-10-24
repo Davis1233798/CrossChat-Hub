@@ -14,13 +14,16 @@ test('five distinct tabs, each hosted website has isolated persistent storage', 
     assert.equal(item.kind, 'web');
   }
   assert.equal(getService('line').url, null);
-  assert.equal(getService('line').kind, 'unsupported-extension');
+  assert.ok(['native-line-experimental', 'native-line-unavailable'].includes(getService('line').kind));
 });
-test('never misrepresent LINE OAuth/Chrome extension as an embeddable web chat', () => {
+test('native LINE requires explicit binding and opt-in; never requests a platform password', () => {
   const ui = readFileSync(new URL('../desktop/shell.html', import.meta.url), 'utf8');
-  assert.match(ui, /LINE 個人聊天尚無法內嵌/);
-  assert.match(ui, /此分頁目前不能收發 LINE 私人訊息/);
+  assert.match(ui, /啟用 LINE 實驗功能/);
+  assert.match(ui, /強制結束 CrossChat 或原生 broker/);
   assert.match(LINE_DOWNLOADS.chrome, /chromewebstore\.google\.com/);
+  const src = readFileSync(new URL('../desktop/main.cjs', import.meta.url), 'utf8');
+  assert.match(src, /validatedWitnessFor\('line'\)/);
+  assert.match(src, /crosschat:line-enable/);
 });
 test('remote navigation only permits HTTPS URLs, not local files or javascript', () => {
   assert.equal(safeNavigation('https://discord.com/app'), true);

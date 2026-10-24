@@ -3,7 +3,7 @@
   "version": "0.4.0-dev.1",
   "private": true,
   "type": "module",
-  "description": "Tabbed desktop workspace for official messaging websites (experimental; LINE cannot be embedded)",
+  "description": "Tabbed desktop workspace for official messaging websites (Windows experimental native LINE tab)",
   "engines": {
     "node": ">=22.13.0"
   },
@@ -12,11 +12,12 @@
     "start": "node --env-file=.env --experimental-sqlite src/server.mjs",
     "dev": "node --env-file=.env --experimental-sqlite --watch src/server.mjs",
     "test": "node --experimental-sqlite --test test/*.test.mjs",
-    "check": "node --check src/server.mjs && node --check src/runtime.mjs && node --check src/app.mjs && node --check src/bridge.mjs && node --check src/store.mjs && node --check src/oauth.mjs && node --check src/gateway.mjs && node --check desktop/main.cjs && node --check desktop/preload.cjs && node --check desktop/slack-account.cjs && node --check desktop/slack-pkce.mjs && node --check desktop/slack-user-api.mjs && node --check desktop/slack-personal-adapter.mjs && node --check public/app.js && node --check test/advanced.test.mjs && node --check test/bridge.test.mjs && node --check test/user-login.test.mjs && node --check src/demo.mjs && node --check src/telegram-user.mjs && node --check src/shutdown.cjs && node --check test/desktop-onboarding.test.mjs && node --check desktop/tab-config.cjs && node --check desktop/shell.js && node --check test/desktop-tabs.test.mjs && node --check desktop/navigation.cjs && node --check scripts/desktop-smoke.cjs && node --check test/desktop-navigation.test.mjs && node --check desktop/lifecycle.cjs && node --check test/desktop-lifecycle.test.mjs && node --check scripts/session-persistence-child.cjs && node --check scripts/session-persistence-smoke.mjs && node --check desktop/session-data.cjs && node --check test/desktop-session-data.test.mjs && node --check desktop/reset-intent.cjs && node --check test/slack-pkce.test.mjs && node --check test/slack-user-api.test.mjs && node --check test/slack-account.test.mjs && node --check test/slack-forwarding-adapter.test.mjs",
+    "check": "node --check src/server.mjs && node --check src/runtime.mjs && node --check src/app.mjs && node --check src/bridge.mjs && node --check src/store.mjs && node --check src/oauth.mjs && node --check src/gateway.mjs && node --check desktop/main.cjs && node --check desktop/preload.cjs && node --check desktop/native-line-broker.cjs && node --check desktop/slack-account.cjs && node --check desktop/slack-pkce.mjs && node --check desktop/slack-user-api.mjs && node --check desktop/slack-personal-adapter.mjs && node --check public/app.js && node --check test/advanced.test.mjs && node --check test/bridge.test.mjs && node --check test/user-login.test.mjs && node --check src/demo.mjs && node --check src/telegram-user.mjs && node --check src/shutdown.cjs && node --check test/desktop-onboarding.test.mjs && node --check desktop/tab-config.cjs && node --check desktop/shell.js && node --check test/desktop-tabs.test.mjs && node --check test/native-line-broker.test.cjs && node --check desktop/navigation.cjs && node --check scripts/desktop-smoke.cjs && node --check scripts/native-line-owned-fixture-smoke.cjs && node --check test/desktop-navigation.test.mjs && node --check desktop/lifecycle.cjs && node --check test/desktop-lifecycle.test.mjs && node --check scripts/session-persistence-child.cjs && node --check scripts/session-persistence-smoke.mjs && node --check desktop/session-data.cjs && node --check test/desktop-session-data.test.mjs && node --check desktop/reset-intent.cjs && node --check test/slack-pkce.test.mjs && node --check test/slack-user-api.test.mjs && node --check test/slack-account.test.mjs && node --check test/slack-forwarding-adapter.test.mjs",
     "desktop": "electron .",
     "desktop:win": "electron-builder --win",
     "build:native:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-native-helpers.ps1",
     "smoke:native:resources": "node scripts/native-resource-smoke.cjs",
+    "smoke:native:line-owned": "electron scripts/native-line-owned-fixture-smoke.cjs",
     "desktop:mac": "electron-builder --mac",
     "desktop:dir": "electron-builder --dir",
     "desktop:win:msi": "electron-builder --win msi --x64",
@@ -59,6 +60,7 @@
     "win": {
       "extraResources": [
         { "from": "build/bin/native-host/LineWitness.exe", "to": "native/LineWitness.exe" },
+        { "from": "build/bin/native-host/ProductBroker.exe", "to": "native/ProductBroker.exe" },
         { "from": "build/bin/native-routing/ReadOnlyRouting.exe", "to": "native/ReadOnlyRouting.exe" }
       ],
       "target": [

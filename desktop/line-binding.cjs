@@ -75,6 +75,20 @@ function createLineBinding({ listCandidates, validateWitness, now = Date.now, ra
         return null;
       }
     },
+    async validatedWitnessFor(platform) {
+      if (platform !== 'line' || !bound) return null;
+      const selected = bound;
+      const requestGeneration = generation;
+      try {
+        const valid = await validateWitness(structuredClone(selected));
+        if (bound !== selected || generation !== requestGeneration) return null;
+        if (!sameWitness(selected, valid)) { bound = null; clearCandidates(); advance(); return null; }
+        return structuredClone(selected);
+      } catch {
+        if (bound === selected) { bound = null; clearCandidates(); advance(); }
+        return null;
+      }
+    },
     state() { return { bound: Boolean(bound) }; },
   };
 }

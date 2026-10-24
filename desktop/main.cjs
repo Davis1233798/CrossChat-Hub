@@ -38,6 +38,8 @@ const permissionVersions = new Map();
 const activeDownloads = new Map();
 let externalPromptPending = false;
 let closing = false;
+let lineBroker = null;
+let quitRequested = false;
 let cancelSelectionArm = () => {};
 let slackAccount = null;
 const workspaceState = createWorkspaceState(path.join(app.getPath('userData'), 'workspace-state'));
@@ -202,6 +204,9 @@ function chooseTab(id) {
   if (!mainWindow || mainWindow.isDestroyed() || closing) return;
   if (currentView) { mainWindow.contentView.removeChildView(currentView); currentView = null; }
   currentId = id;
+  if (lineBroker?.enabled) {
+    lineBroker.setLineVisible(id === 'line').catch(error => announce('line', 'restore-error', error.message));
+  }
   announce(id, 'selected');
   if (service.kind === 'web' && !profileReset.isBlocked(id)) {
     currentView = tabView(service);
@@ -209,7 +214,26 @@ function chooseTab(id) {
     currentView.setBounds(viewBounds());
     currentView.webContents.focus();
   }
-  announce(id, service.kind !== 'web' ? 'unsupported' : profileReset.isBlocked(id) ? (profileReset.isPending(id) ? 'resetting' : 'reset-error') : (currentView.webContents.isLoading() ? 'loading' : 'loaded'));
+  announce(id, service.kind === 'web' ? (profileReset.isBlocked(id) ? (profileReset.isPending(id) ? 'resetting' : 'reset-error') : (currentView.webContents.isLoading() ? 'loading' : 'loaded')) : service.kind === 'native-line-experimental' ? (lineBroker?.enabled ? 'native-enabled' : 'native-ready') : 'unsupported');
+}
+async function requestQuit() {
+  if (quitRequested || closing) return;
+  quitRequested = true;
+  if (lineBroker?.active) {
+    const restored = await lineBroker.detachAndRestoreHub().catch(error => ({ restored: false, detail: error.message }));
+    if (!restored.restored) {
+      quitRequested = false;
+      announce('line', 'restore-error', restored.detail || 'LINE 尚未確認還原；視窗保持開啟，請重試。');
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+      return;
+    }
+  } else if (lineBroker?.blocked) {
+    quitRequested = false;
+    announce('line', 'restore-error', '原生 broker 已停止，無法確認 LINE 視窗已還原。請先確認 LINE 視窗，再處理 CrossChat。');
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+    return;
+  }
+  void quitSafely();
 }
 function destroyServiceWriters(service) {
   const view = views.get(service.id);
@@ -321,8 +345,8 @@ async function openWindow() {
   });
   attachHotkeys(mainWindow.webContents);
   mainWindow.on('resize', () => currentView?.setBounds(viewBounds()));
-  mainWindow.on('close', event => { event.preventDefault(); void quitSafely(); });
-  mainWindow.on('closed', () => { void quitSafely(); });
+  mainWindow.on('close', event => { event.preventDefault(); void requestQuit(); });
+  mainWindow.on('closed', () => { void requestQuit(); });
   await mainWindow.loadFile(path.join(__dirname, 'shell.html'));
   if (!closing) {
     if (brokerStudy) await brokerStudy.attach(mainWindow, () => { void quitSafely(); });
@@ -364,6 +388,14 @@ if (singleInstance) {
       listCandidates: () => smokeHooks ? Promise.resolve([fixtureWitness]) : lineWitness ? lineWitness.listCandidates() : Promise.reject(new Error('LINE binding is available only in the Windows development build')),
       validateWitness: witness => smokeHooks ? Promise.resolve({ ...witness }) : lineWitness ? lineWitness.validateWitness(witness) : Promise.reject(new Error('LINE binding helper unavailable')),
     });
+    if (process.platform === 'win32' && !brokerStudy) {
+      const { createNativeLineBroker } = require('./native-line-broker.cjs');
+      lineBroker = createNativeLineBroker({ binaryPath: nativePaths.lineBroker });
+      lineBroker.onStatus(({ state, detail }) => {
+        announce('line', state === 'enabled' ? 'native-enabled' : state === 'error' || state === 'restore-error' ? 'restore-error' : state, detail);
+        if (state === 'close-request') void requestQuit();
+      });
+    }
     const selectionClient = smokeHooks ? null : createNativeSelectionClient({
       binaryPath: nativePaths.readOnlyRouting,
       witnessFor: platform => lineBinding.witnessFor(platform),
@@ -428,6 +460,22 @@ if (singleInstance) {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
       chooseTab(id); return true;
     });
+    ipcMain.handle('crosschat:line-enable', async event => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      if (!lineBroker) return { state: 'unavailable', detail: 'Windows native LINE is unavailable.' };
+      if (closing || currentId !== 'line') return { state: 'inactive' };
+      const witness = await lineBinding.validatedWitnessFor('line');
+      if (!witness) return { state: 'unbound', detail: '請先確認並綁定已登入的官方 LINE 主視窗。' };
+      try { return await lineBroker.enable(mainWindow, witness); }
+      catch (error) { return { state: 'error', detail: error.message }; }
+    });
+    ipcMain.handle('crosschat:line-restore', async event => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      if (!lineBroker) return { restored: true, inactive: true };
+      if (!lineBroker.active && lineBroker.blocked) return { restored: false, detail: '原生 broker 已停止，無法確認 LINE 視窗已還原。請先確認 LINE 視窗。' };
+      if (!lineBroker.active) return { restored: true, inactive: true };
+      return lineBroker.detachAndRestoreHub();
+    });
     ipcMain.handle('crosschat:tab-reload', (event, id) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
       if (closing || profileReset.isBlocked(id)) return false;
@@ -456,10 +504,10 @@ if (singleInstance) {
     });
     ipcMain.handle('crosschat:quit', event => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
-      void quitSafely();
+      void requestQuit();
     });
     await openWindow();
   }).catch(error => { console.error('Desktop failed to start:', error); app.exit(1); });
-  app.on('before-quit', event => { event.preventDefault(); void quitSafely(); });
-  app.on('window-all-closed', () => { void quitSafely(); });
+  app.on('before-quit', event => { event.preventDefault(); void requestQuit(); });
+  app.on('window-all-closed', () => { void requestQuit(); });
 }

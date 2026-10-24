@@ -22,3 +22,28 @@ foreach ($target in $targets) {
   }
   Write-Output $target.Output
 }
+$productBroker = Join-Path $repoRoot 'build/bin/native-host/ProductBroker.exe'
+$manifest = Join-Path $repoRoot 'experiments/native-host/HubBrokerMixed.manifest'
+$productSources = @((Join-Path $repoRoot 'experiments/native-host/HubBroker.cs'), (Join-Path $repoRoot 'experiments/native-host/LineWitness.cs'))
+$productNeedsBuild = !(Test-Path -LiteralPath $productBroker -PathType Leaf)
+if (!$productNeedsBuild) {
+  $productTime = (Get-Item -LiteralPath $productBroker).LastWriteTimeUtc
+  $productNeedsBuild = $productSources | Where-Object { (Get-Item -LiteralPath $_).LastWriteTimeUtc -gt $productTime } | Select-Object -First 1
+}
+if ($productNeedsBuild) {
+  New-Item -ItemType Directory -Path (Split-Path $productBroker -Parent) -Force | Out-Null
+  & $compiler /nologo /target:winexe /platform:x64 /define:LINE_PRODUCT /main:HubBroker /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll "/win32manifest:$manifest" "/out:$productBroker" $productSources[0] $productSources[1]
+  if ($LASTEXITCODE -ne 0) { throw 'Product native LINE broker build failed' }
+}
+Write-Output $productBroker
+$fixtureBroker = Join-Path $repoRoot 'build/bin/native-host/ProductBrokerFixture.exe'
+$fixtureNeedsBuild = !(Test-Path -LiteralPath $fixtureBroker -PathType Leaf)
+if (!$fixtureNeedsBuild) {
+  $fixtureTime = (Get-Item -LiteralPath $fixtureBroker).LastWriteTimeUtc
+  $fixtureNeedsBuild = $productSources | Where-Object { (Get-Item -LiteralPath $_).LastWriteTimeUtc -gt $fixtureTime } | Select-Object -First 1
+}
+if ($fixtureNeedsBuild) {
+  & $compiler /nologo /target:winexe /platform:x64 /define:LINE_PRODUCT,LINE_PRODUCT_FIXTURE /main:HubBroker /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll "/win32manifest:$manifest" "/out:$fixtureBroker" $productSources[0] $productSources[1]
+  if ($LASTEXITCODE -ne 0) { throw 'Owned-fixture native LINE broker build failed' }
+}
+Write-Output $fixtureBroker
