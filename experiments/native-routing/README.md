@@ -42,11 +42,18 @@ The caller must apply a response deadline and handle a stalled UIA provider;
 this initial helper cannot preempt a hung native provider internally.
 
 Owned Windows tests established a real probe and exact header observation.
-Selection observation returned `focus-outside-target` in the final WPF fixture
-probe; therefore actual selected-text acquisition is **not established**. This
-is the guard refusing to inspect another focused application, not evidence that
-the WPF provider lacks TextPattern. Earlier WinForms generic failures also do
-not prove provider support or lack of it. No actual LINE window was observed.
+The unattended WPF fixture probe returned `focus-outside-target`, correctly
+refusing to inspect another focused application. A subsequent focused test used
+the computer-use skill to activate only the owned fixture and verify its edit
+control and selected text. The product sidecar then returned `ok: true`, exactly
+`Only owned selected text`, provenance `ui-selected-text`, a null platform message
+ID, and exit code 0. The fixture closed normally; neither test process remained.
+No provider workaround or full-text fallback was needed. This establishes that
+the earlier WPF failure was the focus precondition, not missing TextPattern in
+that fixture. Earlier WinForms generic failures still do not establish its
+provider capabilities. This selected-text success is specific to the owned WPF
+control; it is not a guarantee for arbitrary applications or LINE providers.
+No actual LINE window was observed.
 
 Future LINE dryrun must first inspect its actual provider through the applicable
 computer-use skill, then explicitly authorize a product test against that
