@@ -38,6 +38,12 @@ function slackWorkspaceWebUrl(serviceId, value) {
 function protectContents(contents, service, { openExternal, onPopup = () => {}, onWorkspaceLaunch }) {
   const navigate = (event, url, _inPlace, isMainFrame = true) => {
     if (!isMainFrame) return;
+    const workspace = slackWorkspaceWebUrl(service.id, url);
+    if (workspace && onWorkspaceLaunch) {
+      event.preventDefault();
+      onWorkspaceLaunch(workspace);
+      return;
+    }
     const target = navigationTarget(service.id, url);
     if (target === 'internal') return;
     event.preventDefault();

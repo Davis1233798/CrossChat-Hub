@@ -44,6 +44,25 @@ test('Slack fallback does not rewrite authentication, unrecognized or unsafe URL
   assert.equal(slackWorkspaceWebUrl('discord', 'https://workspace.slack.com/ssb/redirect?entry_point=your_workspaces'), null);
 });
 
+test('same-window Slack chooser navigation and redirects use the same web fallback without touching frames or OAuth', () => {
+  const contents = new Contents();
+  const launched = [];
+  protectContents(contents, service, { openExternal() {}, onWorkspaceLaunch: url => launched.push(url) });
+  const chooser = 'https://workspace.slack.com/ssb/redirect?entry_point=your_workspaces';
+  for (const type of ['will-navigate', 'will-redirect']) {
+    const main = event();
+    contents.emit(type, main, chooser, false, true);
+    assert.equal(main.prevented, true);
+    const frame = event();
+    contents.emit(type, frame, chooser, false, false);
+    assert.equal(frame.prevented, false);
+    const oauth = event();
+    contents.emit(type, oauth, `${chooser}&code=oauth`, false, true);
+    assert.equal(oauth.prevented, false);
+  }
+  assert.deepEqual(launched, ['https://workspace.slack.com/', 'https://workspace.slack.com/']);
+});
+
 test('navigation separates official/auth origins, external links, and unsafe URLs', () => {
   for (const url of ['https://app.slack.com/client', 'https://workspace.slack.com/', 'https://accounts.google.com/login']) {
     assert.equal(navigationTarget('slack', url), 'internal');
