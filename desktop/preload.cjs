@@ -15,6 +15,12 @@ contextBridge.exposeInMainWorld('crosschatDesktop', Object.freeze({
   captureSelection: input => ipcRenderer.invoke('crosschat:selection-capture', input),
   prepareSelection: input => ipcRenderer.invoke('crosschat:selection-prepare', input),
   revokeSelection: input => ipcRenderer.invoke('crosschat:selection-revoke', input),
+  inspectCurrentSlackDestination: () => ipcRenderer.invoke('crosschat:slack-destination-current'),
+  selectCurrentSlackDestination: () => ipcRenderer.invoke('crosschat:slack-destination-select'),
+  validateSlackDestination: selectionId => ipcRenderer.invoke('crosschat:slack-destination-validate', selectionId),
+  onSlackDestinationInvalidated: callback => {
+    ipcRenderer.on('crosschat:slack-destination-invalidated', () => callback());
+  },
   armSelectionCapture: input => ipcRenderer.invoke('crosschat:selection-arm', input),
   activateSelectionCapture: input => ipcRenderer.invoke('crosschat:selection-arm-activate', input),
   cancelSelectionCapture: input => ipcRenderer.invoke('crosschat:selection-arm-cancel', input),

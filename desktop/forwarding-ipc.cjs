@@ -1,5 +1,5 @@
 'use strict';
-function registerForwardingIpc(ipcMain, getWindow, shellUrl, drafts, lineBinding = null, selectionArming = null) {
+function registerForwardingIpc(ipcMain, getWindow, shellUrl, drafts, lineBinding = null, selectionArming = null, slackDestinations = null) {
   const trusted = event => {
     const window = getWindow();
     return window && !window.isDestroyed() && event.sender === window.webContents &&
@@ -18,6 +18,21 @@ function registerForwardingIpc(ipcMain, getWindow, shellUrl, drafts, lineBinding
     ipcMain.handle(`crosschat:${channel}`, (event, input) => {
       if (!trusted(event)) throw new Error('Untrusted composer sender');
       return drafts[method](input);
+    });
+  }
+  if (slackDestinations) {
+    ipcMain.handle('crosschat:slack-destination-current', event => {
+      if (!trusted(event)) throw new Error('Untrusted composer sender');
+      return slackDestinations.inspectCurrent();
+    });
+    ipcMain.handle('crosschat:slack-destination-select', event => {
+      if (!trusted(event)) throw new Error('Untrusted composer sender');
+      return slackDestinations.selectCurrent();
+    });
+    ipcMain.handle('crosschat:slack-destination-validate', (event, selectionId, ...args) => {
+      if (!trusted(event)) throw new Error('Untrusted composer sender');
+      if (args.length || typeof selectionId !== 'string' || selectionId.length > 128) throw new Error('Invalid Slack destination reference');
+      return slackDestinations.validateSelection(selectionId);
     });
   }
   if (selectionArming) {

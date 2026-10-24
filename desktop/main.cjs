@@ -10,6 +10,7 @@ const { createResetIntentStore } = require('./reset-intent.cjs');
 const { createWorkspaceState } = require('./workspace-state.cjs');
 const { createForwardingLedger } = require('./forwarding-ledger.cjs');
 const { registerForwardingIpc } = require('./forwarding-ipc.cjs');
+const { createSlackDestinationSnapshots } = require('./slack-destination.cjs');
 const { createLineBinding } = require('./line-binding.cjs');
 const { createLineWitnessClient } = require('./line-witness-client.cjs');
 const { createSelectionArming } = require('./selection-arming.cjs');
@@ -163,6 +164,15 @@ function tabView(service) {
     rememberWorkspace(popup.webContents, service);
   } });
   rememberWorkspace(wc, service);
+  if (service.id === 'slack') {
+    wc.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => slackDestinationSnapshots.navigationStarted(wc, isMainFrame));
+    wc.on('did-navigate', (_event, url) => slackDestinationSnapshots.navigationCompleted(wc, url, true));
+    wc.on('did-navigate-in-page', (_event, url, isMainFrame) => slackDestinationSnapshots.navigationCompleted(wc, url, isMainFrame));
+    wc.on('did-fail-load', (_event, _code, _description, _url, isMainFrame) => {
+      if (isMainFrame) slackDestinationSnapshots.navigationStarted(wc, true);
+    });
+    wc.once('destroyed', () => slackDestinationSnapshots.navigationStarted(wc, true));
+  }
   attachHotkeys(wc);
   wc.on('did-start-loading', () => report('loading'));
   wc.on('did-finish-load', () => report('loaded'));
@@ -199,6 +209,7 @@ function chooseTab(id) {
 }
 function destroyServiceWriters(service) {
   const view = views.get(service.id);
+  if (service.id === 'slack') slackDestinationSnapshots.invalidate();
   if (view && currentView === view) {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.contentView.removeChildView(view);
     currentView = null;
@@ -238,6 +249,15 @@ const profileReset = createSessionReset({
   onState: (id, state) => {
     announce(id, state);
     if (state === 'cleared' && !closing && currentId === id) chooseTab(id);
+  },
+});
+const slackDestinationSnapshots = createSlackDestinationSnapshots({
+  getSlackView: () => views.get('slack'),
+  getActiveSlackView: () => currentId === 'slack' && currentView === views.get('slack') ? currentView : null,
+  getPartition: () => getService('slack').partition,
+  isBlocked: () => profileReset.isBlocked('slack') || closing,
+  onInvalidate: () => {
+    if (!closing && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('crosschat:slack-destination-invalidated');
   },
 });
 function attachHotkeys(contents) {
@@ -340,7 +360,7 @@ if (singleInstance) {
       onResult: result => { if (!closing && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('crosschat:selection-observed', result); },
     });
     cancelSelectionArm = () => selectionArming.close();
-    registerForwardingIpc(ipcMain, () => mainWindow, pathToFileURL(path.join(__dirname, 'shell.html')).href, drafts, lineBinding, selectionArming);
+    registerForwardingIpc(ipcMain, () => mainWindow, pathToFileURL(path.join(__dirname, 'shell.html')).href, drafts, lineBinding, selectionArming, slackDestinationSnapshots);
     ipcMain.handle('crosschat:tab-switch', (event, id) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
       chooseTab(id); return true;

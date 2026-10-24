@@ -10,7 +10,12 @@ test('preload IPC traverses main-frame guard into private draft service', async 
   const frame = { url }, contents = { mainFrame: frame }, window = { webContents: contents, isDestroyed: () => false };
   const arming = { arm: async input => ({ status: 'prepared', armId: 'opaque' }), activate: input => ({ status: 'armed', armId: input.armId }),
     acknowledge: () => ({ status: 'accepted' }), cancel: input => ({ status: 'cancelled' }), close() {} };
-  registerForwardingIpc({ handle: (key, fn) => handlers.set(key, fn) }, () => window, url, createForwardingDrafts(), null, arming);
+  const slackDestinations = {
+    inspectCurrent: () => ({ status: 'identified', teamId: 'T123', conversationId: 'C456', label: null, labelStatus: 'unknown-from-url' }),
+    selectCurrent: () => ({ status: 'identified', teamId: 'T123', conversationId: 'C456', label: null, labelStatus: 'unknown-from-url', selectionId: 'opaque' }),
+    validateSelection: id => id === 'opaque' ? { status: 'identified', teamId: 'T123', conversationId: 'C456', label: null, labelStatus: 'unknown-from-url', selectionId: id } : { status: 'stale' },
+  };
+  registerForwardingIpc({ handle: (key, fn) => handlers.set(key, fn) }, () => window, url, createForwardingDrafts(), null, arming, slackDestinations);
   let exposed;
   const event = { sender: contents, senderFrame: frame };
   vm.runInNewContext(readFileSync(new URL('../desktop/preload.cjs', import.meta.url), 'utf8'), {
@@ -22,6 +27,11 @@ test('preload IPC traverses main-frame guard into private draft service', async 
   const result = await exposed.prepareDraft({ text: '@line:研發群:小明 Hello' });
   assert.equal(result.status, 'unsupported'); assert.equal(result.preview.memberName, '小明');
   assert.equal(result.plan, undefined); assert.equal(result.target, undefined);
+  const slackDestination = await exposed.selectCurrentSlackDestination();
+  assert.equal(slackDestination.selectionId, 'opaque');
+  assert.equal(slackDestination.conversationId, 'C456');
+  assert.equal('target' in slackDestination, false);
+  assert.equal((await exposed.validateSlackDestination('opaque')).status, 'identified');
   assert.equal((await exposed.executeDraft(result.draftId, result.revision)).status, 'unsupported');
   assert.equal(exposed.captureObservedSelection, undefined);
   const capture = await exposed.captureSelection({ text: '單則原文', platform: 'line', chatName: '來源群' });
@@ -41,7 +51,7 @@ test('preload IPC traverses main-frame guard into private draft service', async 
     { sender: {}, senderFrame: frame }, // remote view or popup
     { sender: contents, senderFrame: { url } }, // iframe, including same-origin
     { sender: contents, senderFrame: null },
-  ]) for (const channel of ['draft-prepare', 'selection-capture', 'selection-prepare', 'selection-revoke', 'selection-arm', 'selection-arm-activate', 'selection-arm-cancel', 'selection-arm-ack']) assert.throws(() => handlers.get(`crosschat:${channel}`)(bad, { text: 'x' }), /Untrusted/);
+  ]) for (const channel of ['draft-prepare', 'selection-capture', 'selection-prepare', 'selection-revoke', 'selection-arm', 'selection-arm-activate', 'selection-arm-cancel', 'selection-arm-ack', 'slack-destination-current', 'slack-destination-select', 'slack-destination-validate']) assert.throws(() => handlers.get(`crosschat:${channel}`)(bad, { text: 'x' }), /Untrusted/);
   frame.url = 'https://example.com/';
   assert.throws(() => handlers.get('crosschat:draft-prepare')(event, { text: 'x' }), /Untrusted/);
 });
@@ -53,6 +63,8 @@ test('shell composer uses text-only previews and reserves space below external v
   assert.match(html, /textarea id="compose-text"/);
   assert.match(js, /prepareDraft\(input\)/); assert.doesNotMatch(js, /executeDraft\(|innerHTML/);
   assert.match(html, /id="selection-arm"/); assert.match(js, /armSelectionCapture/); assert.match(js, /onObservedSelection/);
+  assert.match(html, /id="slack-destination-select"/); assert.match(js, /selectCurrentSlackDestination/);
+  assert.match(js, /未發送/);
   assert.doesNotMatch(readFileSync(new URL('../desktop/preload.cjs', import.meta.url), 'utf8'), /captureObservedSelection/);
   assert.match(main, /height - HEADER_HEIGHT - COMPOSER_HEIGHT/);
   assert.match(main, /path\.join\(app\.getPath\('userData'\), 'forwarding-ledger'\)/);

@@ -50,6 +50,7 @@
   <label for="compose-text" id="compose-text-label">跨軟體訊息</label>
   <textarea id="compose-text" rows="2" maxlength="16000" placeholder="@line:群組名 訊息內容" spellcheck="false"></textarea>
   <label id="compose-route-row" hidden>轉發目的地 <input id="compose-route" maxlength="1024" placeholder="@slack:頻道名（只填目的地，不填內容）"></label>
+  <div id="slack-destination-preview" hidden><button type="button" id="slack-destination-select" class="secondary">記住目前 Slack 目的地供預覽</button><span id="slack-destination-status">只供預覽，不會用於傳送。</span></div>
   <div class="compose-actions"><button type="button" id="compose-preview">預覽目的地</button><button type="button" id="compose-send" disabled>傳送（尚未支援）</button><span id="compose-status" role="status">目前可解析目的地；個人聊天傳送尚未接通，不會發出訊息。</span></div>
 </section>
 </body>

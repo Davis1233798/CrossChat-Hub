@@ -119,6 +119,35 @@
     };
     status.textContent = `${id} · ${labels[state] ?? state}`;
   });
+  const slackDestinationPanel = document.getElementById('slack-destination-preview');
+  const slackDestinationButton = document.getElementById('slack-destination-select');
+  const slackDestinationStatus = document.getElementById('slack-destination-status');
+  let slackDestinationSelection = null;
+  function clearSlackDestinationSelection() {
+    slackDestinationSelection = null;
+    slackDestinationStatus.textContent = '目前沒有已記住的 Slack 目的地。只供預覽，不會用於傳送。';
+  }
+  window.crosschatDesktop.onSlackDestinationInvalidated(clearSlackDestinationSelection);
+  slackDestinationButton.addEventListener('click', async () => {
+    if (selected !== 'slack') {
+      slackDestinationStatus.textContent = '請先切到 Slack 分頁並打開目的聊天室；不會讀取聊天內容。';
+      return;
+    }
+    slackDestinationButton.disabled = true;
+    try {
+      const result = await window.crosschatDesktop.selectCurrentSlackDestination();
+      if (result.status !== 'identified') {
+        clearSlackDestinationSelection();
+        slackDestinationStatus.textContent = '目前網址無法確認 Slack 工作區與聊天室 ID；名稱未知。';
+      } else {
+        slackDestinationSelection = result.selectionId;
+        slackDestinationStatus.textContent = `已記住候選目的地：工作區 ${result.teamId} · 聊天室 ${result.conversationId} · 名稱無法由網址確認。此候選未連接轉發路由，未發送。`;
+      }
+    } catch {
+      clearSlackDestinationSelection();
+      slackDestinationStatus.textContent = '無法確認 Slack 目前目的地。未發送。';
+    } finally { slackDestinationButton.disabled = false; }
+  });
   select(selected);
   const composeText = document.getElementById('compose-text');
   const composeStatus = document.getElementById('compose-status');
@@ -153,12 +182,16 @@
     const forwarding = mode.value === 'selection';
     document.getElementById('compose-source').hidden = !forwarding;
     document.getElementById('compose-route-row').hidden = !forwarding;
+    slackDestinationPanel.hidden = !forwarding || sourcePlatform.value !== 'line';
     document.getElementById('compose-text-label').textContent = forwarding ? '貼入要轉發的單則原文' : '跨軟體訊息';
     document.getElementById('compose-help').textContent = forwarding ? '請自行核對來源及原文；預覽不會發送訊息' : '例如 @line:群組名:人名 要說的話；名稱含空白請用雙引號';
     composeText.placeholder = forwarding ? '貼入你選擇的單則文字；不會自動讀取聊天記錄' : '@line:群組名 訊息內容';
     selectionArm.hidden = !forwarding || sourcePlatform.value !== 'line';
   });
-  sourcePlatform.addEventListener('change', () => { selectionArm.hidden = mode.value !== 'selection' || sourcePlatform.value !== 'line'; });
+  sourcePlatform.addEventListener('change', () => {
+    selectionArm.hidden = mode.value !== 'selection' || sourcePlatform.value !== 'line';
+    slackDestinationPanel.hidden = mode.value !== 'selection' || sourcePlatform.value !== 'line';
+  });
   selectionArm.addEventListener('click', async () => {
     if (armedSelection || mode.value !== 'selection' || sourcePlatform.value !== 'line' || !sourceChat.value.trim()) {
       composeStatus.textContent = '請選擇 LINE 並填寫來源聊天室名稱。尚未讀取或發送。'; return;
