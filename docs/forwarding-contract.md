@@ -10,7 +10,8 @@ use `\"` and `\\`. The body after the separating whitespace remains text,
 including any later route-looking strings. Group names are case-sensitive.
 
 `src/forwarding.mjs` provides the routing and forwarding seam. It is **not yet
-connected to desktop tabs or an actual personal-account UI adapter**. Existing
+connected to an actual personal-account UI adapter**. The desktop shell now
+provides composer previews through main-owned drafts and narrow IPC. Existing
 `src/bridge.mjs` and its Bot/OA outbox retain their separate administrative
 purpose; they cannot resolve personal LINE group names or native mentions.
 Extended `@line:group:person` syntax is excluded from the legacy alias parser,
@@ -35,9 +36,9 @@ so it cannot accidentally send a DM to alias `group`.
    Unsupported attachments or mentions fail before execution, never disappear.
 4. `executeForward(prepared, adapter, ledger)` needs a persistent ledger with
    atomic durable `claim(dedupeKey)` and `settle(key, outcome)` operations.
-   `desktop/forwarding-ledger.cjs` now supplies an unconnected filesystem ledger
-   intended for a main-process-owned directory under Electron `userData`.
-   No personal UI adapter or desktop send integration is supplied yet. A send exception or insufficient receipt is
+   `desktop/forwarding-ledger.cjs` supplies a filesystem ledger for the
+   main-process-owned directory under Electron `userData`. Composer orchestration
+   is connected, but no personal UI adapter is registered. A send exception or insufficient receipt is
    `unknown`, stays claimed, and requires target-chat reconciliation before
    retry. It must not be automatically retried like the old Bot outbox.
 5. Execution returns `submitted` only with the exact target and target message
@@ -52,8 +53,9 @@ accept an arbitrary renderer-supplied `prepared` plan, target ID or dedupe key
 for execution. This module is an internal orchestration boundary, not an IPC
 authorization layer. Plans must be revalidated after account/chat changes.
 
-`desktop/forwarding-drafts.mjs` supplies this main-private draft service, without
-desktop IPC/UI wiring. `prepare({text, draftId?, revision?})` generates an opaque
+`desktop/forwarding-drafts.mjs` supplies the main-private draft service, wired
+through `desktop/forwarding-ipc.cjs`, preload and the shell composer.
+`prepare({text, draftId?, revision?})` generates an opaque
 main-owned ID for new compose messages and retains the resolved plan internally.
 Editing needs the current revision and invalidates prior preparation, including
 late asynchronous results. Responses expose only display-name preview/status.

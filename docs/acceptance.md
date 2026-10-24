@@ -178,3 +178,32 @@ It is fresh-profile-only and cannot establish persistent account sessions.
 See [pre-login gates](../experiments/line-host/native/LINE-PRELOGIN.md).
 No official extension payload, account data or credentials are tracked, and no
 five-platform release or real LINE login/send/receive/session/logout is claimed.
+
+## Native/routing/composer checkpoint — 2026-10-24
+
+Code checkpoint `460630a` passed [unit CI](https://github.com/JackChen6203/CrossChat-Hub/actions/runs/39972625794)
+and the [desktop matrix](https://github.com/JackChen6203/CrossChat-Hub/actions/runs/39972625955),
+including the 15 isolated CEF fixture mocks, three-platform Electron window/session
+tests, Windows NSIS/MSI lifecycle and both installed macOS bundle checks. These
+runs predate the native/routing/composer and Slack changes below.
+
+Through `8385d38`, Windows native experiments have separate evidence: a fresh
+Chrome window was visually embedded and structurally restored; an explicitly
+identified LINE main window passed structural parent/style/size/restoration
+checks only. Direct-parent hard-crash recovery failed. A later owned synthetic
+top-level broker survived controller termination and restored its chat fixture;
+broker-crash recovery and production integration remain unimplemented. This is
+not real LINE chat, IME, focus, popup or macOS native-host acceptance.
+
+Personal-chat routing, main-private drafts, a fail-closed durable reservation
+ledger and shell composer previews are implemented. The default personal adapter
+registry is empty: previews report unsupported and cannot send. Local/mock tests
+do not establish real group resolution, native mentions or cross-platform delivery.
+Slack Google-account redirects and workspace chooser routing have fixes, but
+the user's actual Slack authentication has not completed; login/session success
+must not be inferred. New product checks must cover these source changes before
+the earlier green matrix can be treated as current-code evidence.
+
+The five-platform personal-account, LINE same-window product integration,
+send/receive/restart/logout, authorized routing, old-version upgrades/coexistence
+and signing/release gates remain open. Native experiments stay outside packaging.

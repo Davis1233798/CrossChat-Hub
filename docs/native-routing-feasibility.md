@@ -45,6 +45,13 @@
 | LINE → 另一軟體 | 已選來源訊息與正確目標的逐項對照 | 未執行 |
 | 另一軟體 → LINE | LINE 指定群組收到，mention 另項確認 | 未執行 |
 | 送出後連線／視窗中斷 | 保持 unknown，沒有重送 | 設計，未執行 |
-| 嵌入與解除嵌入 | 焦點／中文輸入／縮放／彈窗正常，原視窗可還原 | 未執行 |
+| 嵌入與解除嵌入 | 焦點／中文輸入／縮放／彈窗正常，原視窗可還原 | Windows Chrome 視覺嵌入與 LINE parent/style/bounds 還原結構驗證已過；LINE 視覺／輸入／IME／彈窗未驗證，尚未整合正式 Hub |
+
+2026-10-24 checkpoint：個人路由 parser、主程序私有 draft、持久化 reservation
+ledger 與 Hub composer preview 已實作；預設個人 adapter registry 為空，因此
+unsupported 預覽不會送訊息。此層的 mock／本機檔案測試不證明 LINE 選房或 mention。
+原生實驗另外驗證了 top-level broker 在自有 controller 崩潰後保留自有 chat HWND
+並正常還原，但不涵蓋 broker 自身崩潰，也未接入產品。證據與未驗證項目見
+`experiments/native-host/README.md`；以上真實群組收發驗收仍未執行。
 
 本文件不包含真聊天資料、帳號 Token、用戶端資料庫或截圖。可測方案成立，不等於平台提供或保證自動化介面；UI 可及性與真實 mention 狀態必須以安裝版本做驗證。
