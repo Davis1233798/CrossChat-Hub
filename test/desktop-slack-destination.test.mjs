@@ -92,6 +92,8 @@ test('trusted composer IPC exposes only a user-selected public snapshot, never v
   assert.equal('target' in selected, false);
   assert.equal('partition' in selected, false);
   assert.equal('webContentsId' in selected, false);
+  assert.throws(() => handlers.get('crosschat:slack-destination-current')(event, 'unexpected'), /Invalid Slack destination preview request/);
+  assert.throws(() => handlers.get('crosschat:slack-destination-select')(event, { teamId: 'T-forged' }), /Invalid Slack destination selection request/);
   assert.equal(handlers.get('crosschat:slack-destination-validate')(event, 'opaque').status, 'identified');
   assert.throws(() => handlers.get('crosschat:slack-destination-select')({ sender: {}, senderFrame: frame }), /Untrusted/);
   wc.url = 'https://app.slack.com/signin';

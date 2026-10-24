@@ -21,12 +21,14 @@ function registerForwardingIpc(ipcMain, getWindow, shellUrl, drafts, lineBinding
     });
   }
   if (slackDestinations) {
-    ipcMain.handle('crosschat:slack-destination-current', event => {
+    ipcMain.handle('crosschat:slack-destination-current', (event, ...args) => {
       if (!trusted(event)) throw new Error('Untrusted composer sender');
+      if (args.length) throw new Error('Invalid Slack destination preview request');
       return slackDestinations.inspectCurrent();
     });
-    ipcMain.handle('crosschat:slack-destination-select', event => {
+    ipcMain.handle('crosschat:slack-destination-select', (event, ...args) => {
       if (!trusted(event)) throw new Error('Untrusted composer sender');
+      if (args.length) throw new Error('Invalid Slack destination selection request');
       return slackDestinations.selectCurrent();
     });
     ipcMain.handle('crosschat:slack-destination-validate', (event, selectionId, ...args) => {
