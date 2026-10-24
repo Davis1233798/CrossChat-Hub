@@ -21,7 +21,7 @@ try {
   let stderr=''; reader.stderr.on('data', b => stderr += b);
   const lines = createInterface({ input: reader.stdout });
   const pending = [];
-  lines.on('line', line => pending.shift()?.(JSON.parse(line)));
+  lines.on('line', line => {const value=JSON.parse(line);if(value.type==='ready'){assert.equal(value.nonce,nonce);return;}pending.shift()?.(value);});
   let sequence = 0;
   async function request(op, extra = {}) {
     const response = new Promise((resolve,reject) => {

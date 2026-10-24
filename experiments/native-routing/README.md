@@ -7,6 +7,7 @@ registered as a working LINE adapter, and is not in production packaging.
 
 Developer build: `powershell -NoProfile -File experiments/native-routing/build.ps1`.
 Owned fixture check: `node experiments/native-routing/smoke.mjs`.
+Main-owned client end-to-end check: `node experiments/native-routing/client-smoke.mjs`.
 Outputs are ignored under `build/bin/native-routing/`; fixture startup metadata
 is written only to its own temporary directory. No actual chats are used.
 
@@ -25,6 +26,16 @@ stdin/stdout carry bounded JSON lines (32768 characters, no network listener):
 {"v":1,"id":"2","op":"observe-selection","nonce":"<nonce>"}
 {"v":1,"id":"3","op":"observe-header","nonce":"<nonce>","path":[{"automationId":"chatHeader","controlType":"Text"}]}
 ```
+
+The helper validates the initial witness and emits a nonce-bound `ready` record
+before accepting one observation request. The main-owned client verifies that
+record before sending the request; it never treats process startup timing as
+readiness. The client E2E uses only an owned WPF fixture, which activates and
+selects its immutable test text on a fixture-controlled request. Its test-only
+selection path names one exact direct child by AutomationId and control type;
+the helper also requires the target window to remain the foreground root and
+the selected control to own keyboard focus. Normal product witnesses remain
+unbound unless trusted main-process code explicitly provides a path.
 
 `probe` returns only the explicit target window title and process witness.
 `observe-selection` reads one nonempty TextPattern selection only when the

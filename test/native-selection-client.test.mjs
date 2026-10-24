@@ -22,9 +22,10 @@ function fixture(transform = x => x, options = {}) {
           witness: { pid:100, startTicks:'12345', hwnd:'456', executable:'owned-fixture.exe' },
           text:'Owned selected text', provenance:'ui-selected-text', platformMessageId:null } });
         if (response === null) return;
-        child.stdout.write(typeof response === 'string' ? response : JSON.stringify(response));
+        child.stdout.write((typeof response === 'string' ? response : JSON.stringify(response))+'\n');
         child.exitCode = 0; child.emit('close', 0);
       });
+      queueMicrotask(()=>child.stdout.write(JSON.stringify({v:1,type:'ready',nonce:args[4],witness:{pid:100,startTicks:'12345',hwnd:'456',executable:'owned-fixture.exe'}})+'\n'));
       return child;
     }, ...options });
   return { client, kills: () => kills, spawns: () => spawns };
