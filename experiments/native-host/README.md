@@ -261,3 +261,38 @@ failure preserved the failure result and verified reverse rollback while Hub
 was alive: Hub remained -3 after detach, fixture remained -4, root/pane remained
 -4. No broker processes remained. This establishes an owned-window DPI candidate,
 not real-LINE embedding, mixed-monitor behavior or broker-hard-crash safety.
+
+## Dedicated real-LINE short study (not a product adapter)
+
+The fixed `LineWitness.exe` verifies the installed LINE path, native Authenticode
+trust and the observed valid publisher `LY Corporation`, then records unique
+visible root HWND/PID/start time/DPI/hash metadata. `LineBrokerStudy.exe` is a
+separately compiled normal-only path: it revalidates that witness, never launches,
+closes or kills LINE, and accepts no failure/crash test mode. Its source is the
+`LINE_STUDY` compilation branch of `HubBroker.cs`, with `LineWitness.cs`.
+
+Activation requires all study flags plus a fresh, explicitly classified non-auth
+LINE HWND in the developer environment: `CROSSCHAT_BROKER_LINE_STUDY=1`, the
+existing isolated study flag, `mixed-v2`, `manual`, no injection, and ephemeral
+`CROSSCHAT_LINE_CLASSIFIED_HWND`/`CROSSCHAT_LINE_CLASSIFIED_AT`. These values and
+the witness are not stored in the repository. Renderer input cannot select an
+arbitrary process/window. Broker starts its deadline before attachment, refuses
+preflight taking over 8 seconds, provides **Detach LINE now**, and automatically
+detaches at 20 seconds. Restore failure keeps the root alive for diagnosis.
+This timer depends on a responsive UI thread and is not hard-kill protection.
+
+One normal real-LINE run on 2026-10-24 completed restoration in about 20.5 seconds:
+same process/start time/original HWND, original parent/style/placement/bounds,
+visibility and PMv2 context were verified; LINE remained responsive and the broker
+exited without residue. No typing, messaging or forwarding occurred, and no chat
+content was extracted, transcribed or saved. **Layout did not pass:** LINE's outer width read back 364 pixels
+for a 360-pixel allocation (4-pixel excess). Computer Use capture failed with
+`window crop is outside captured monitor`; visual embedding remains unverified.
+There was no second attachment to pursue a screenshot.
+
+The original ignored runtime result retained its raw cycle-only `success=true`
+alongside `resizeVerified=false`; it has not been altered. Output now separates
+`normalCycleCompleted`, `layoutVerified` and `overallAccepted` to prevent a
+successful restoration cycle from concealing failed layout. This is not final
+LINE-tab integration or verified messaging. Broker hard termination can still
+destroy an attached third-party child HWND and remains unresolved.

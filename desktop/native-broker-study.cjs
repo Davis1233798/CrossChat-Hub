@@ -5,9 +5,11 @@ const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const crypto = require('node:crypto');
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
 
 function configureBrokerStudy(app) {
+  const lineStudy = process.env.CROSSCHAT_BROKER_LINE_STUDY === '1';
+  if (lineStudy && process.env.CROSSCHAT_BROKER_STUDY !== '1') throw new Error('LINE study requires isolated broker study');
   if (process.env.CROSSCHAT_BROKER_STUDY !== '1') return null;
   if (process.platform !== 'win32' || app.isPackaged) throw new Error('Native broker study requires unpackaged Windows');
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'crosschat-broker-hub-'));
@@ -22,11 +24,20 @@ function configureBrokerStudy(app) {
   if (!['none', 'after-hub-parent', 'after-fixture-parent', 'after-resize', 'stdio-eof'].includes(injection)) throw new Error('Invalid broker failure injection');
   const dpiMode = process.env.CROSSCHAT_BROKER_DPI || 'strict-v1';
   if (!['strict-v1', 'mixed-v2'].includes(dpiMode)) throw new Error('Invalid broker DPI study mode');
-  const binary = path.join(__dirname, '..', 'build', 'bin', 'native-host', dpiMode === 'mixed-v2' ? 'HubBrokerMixed.exe' : 'HubBroker.exe');
+  if (lineStudy && (dpiMode !== 'mixed-v2' || mode !== 'manual' || injection !== 'none')) throw new Error('LINE study permits only mixed-v2 manual normal operation');
+  const binary = path.join(__dirname, '..', 'build', 'bin', 'native-host', lineStudy ? 'LineBrokerStudy.exe' : dpiMode === 'mixed-v2' ? 'HubBrokerMixed.exe' : 'HubBroker.exe');
   if (!fs.existsSync(binary) || !fs.statSync(binary).isFile()) throw new Error('Build the fixed HubBroker.exe before enabling broker study');
+  let lineWitness;
+  if (lineStudy) {
+    const classified = Number(process.env.CROSSCHAT_LINE_CLASSIFIED_AT);
+    if (!Number.isSafeInteger(classified) || Date.now() - classified < 0 || Date.now() - classified > 300000) throw new Error('Fresh non-authentication LINE window classification required');
+    lineWitness = JSON.parse(execFileSync(path.join(path.dirname(binary), 'LineWitness.exe'), [], { encoding: 'utf8', timeout: 15000, windowsHide: true }));
+    if (lineWitness.hwnd !== process.env.CROSSCHAT_LINE_CLASSIFIED_HWND || lineWitness.publisher !== 'LY Corporation' || lineWitness.dpiContext !== 'context-4') throw new Error('LINE witness does not match the classified window');
+    fs.writeFileSync(path.join(profile, 'line-witness.json'), JSON.stringify(lineWitness));
+  }
   let server, origin, sidecar, attached = false, shuttingDown = false, failed = false;
   const urlPath = '/' + crypto.randomBytes(20).toString('hex');
-  const evidence = { profile, resultPath, mode, injection, dpiMode, controllerPid: process.pid };
+  const evidence = { profile, resultPath, mode, injection, dpiMode, lineStudy, controllerPid: process.pid };
   fs.writeFileSync(path.join(profile, 'study.json'), JSON.stringify(evidence));
   console.log('CROSSCHAT_BROKER_STUDY ' + JSON.stringify(evidence));
   function write(type, fields = {}) {
@@ -86,12 +97,14 @@ function configureBrokerStudy(app) {
               if (line.length > 4096) throw new Error('Broker line too long');
               const msg = JSON.parse(line);
               if (msg.v !== 1 || msg.nonce !== nonce) throw new Error('Broker handshake identity mismatch');
-              if (msg.type === 'ready' && !ready) { ready = true; write('attach', { pid: process.pid, hwnd, startTicks: msg.startTicks }); }
+              if (msg.type === 'ready' && !ready) { ready = true; write('attach', { pid: process.pid, hwnd, startTicks: msg.startTicks, ...(lineStudy ? { lineWitness } : {}) }); }
               else if (msg.type === 'attached' && ready && !attached) {
                 attached = true; clearTimeout(timer); window.show(); settled = true; resolve(msg);
-                if (injection === 'stdio-eof') sidecar.stdin.end();
+                if (lineStudy) setTimeout(() => write('resize-check'), 1000);
+                else if (injection === 'stdio-eof') sidecar.stdin.end();
                 else if (mode !== 'manual') setTimeout(() => { write('resize-check'); setTimeout(() => mode === 'normal' ? quit() : process.exit(73), 1500); }, 1500);
               } else if (msg.type === 'close-request') quit();
+              else if (msg.type === 'line-detached' && lineStudy) { if (msg.restored === true && msg.alive === true) quit(); else { failed = true; console.error('LINE detach incomplete; broker retained.'); } }
               else if (msg.type === 'focus-hub') window.focus();
               else if (msg.type === 'error') {
                 failed = true;

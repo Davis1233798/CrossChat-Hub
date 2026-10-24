@@ -24,6 +24,13 @@ $mixedExecutable = Join-Path $outputDir 'HubBrokerMixed.exe'
 $mixedManifest = Join-Path $PSScriptRoot 'HubBrokerMixed.manifest'
 & $compiler /nologo /target:winexe /platform:x64 /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll "/win32manifest:$mixedManifest" "/out:$mixedExecutable" $hubBrokerSource
 if ($LASTEXITCODE -ne 0) { throw 'Mixed-DPI broker study compilation failed' }
+$lineWitnessSource = Join-Path $PSScriptRoot 'LineWitness.cs'
+$lineWitnessExecutable = Join-Path $outputDir 'LineWitness.exe'
+& $compiler /nologo /target:exe /platform:x64 /reference:System.Web.Extensions.dll "/out:$lineWitnessExecutable" $lineWitnessSource
+if ($LASTEXITCODE -ne 0) { throw 'LINE witness compilation failed' }
+$lineBrokerExecutable = Join-Path $outputDir 'LineBrokerStudy.exe'
+& $compiler /nologo /target:winexe /platform:x64 /define:LINE_STUDY /main:HubBroker /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll "/win32manifest:$mixedManifest" "/out:$lineBrokerExecutable" $hubBrokerSource $lineWitnessSource
+if ($LASTEXITCODE -ne 0) { throw 'LINE broker study compilation failed' }
 $probeSource = Join-Path $PSScriptRoot 'CompatibilityProbe.cs'
 $probeExecutable = Join-Path $outputDir 'CompatibilityProbe.exe'
 & $compiler /nologo /target:exe /platform:x64 /reference:System.Web.Extensions.dll "/out:$probeExecutable" $probeSource
