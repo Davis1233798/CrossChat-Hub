@@ -193,6 +193,25 @@ test('disconnect during async safeStorage decrypt prevents stale reload auth.tes
   service.close();
 });
 
+test('disconnect during deferred encryption availability prevents PKCE begin', async t => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'crosschat-slack-storage-race-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  let resolveAvailability, beginCalls = 0;
+  const safeStorage = { ...mockStorage(), isAsyncEncryptionAvailable: () => new Promise(resolve => { resolveAvailability = resolve; }) };
+  const service = createSlackAccountService({ pkce: { isConfigured: true, async begin() { beginCalls++; throw new Error('must not begin'); } },
+    userApi: { async verifyAccount() { assert.fail('no token is available'); } }, safeStorage,
+    filePath: path.join(dir, 'account.enc'), clientId, registeredLoopbackRedirectUri: redirectUri });
+  const connecting = service.connect(async () => assert.fail('must not open authorize URL'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(service.getStatus().state, 'connecting');
+  assert.equal((await service.disconnect()).state, 'signed-out');
+  resolveAvailability(true);
+  assert.equal((await connecting).state, 'signed-out');
+  assert.equal(service.getStatus().state, 'signed-out');
+  assert.equal(beginCalls, 0);
+  service.close();
+});
+
 test('expired saved authorization is not sent to auth.test and requires reauthorization', async t => {
   const f = await fixture();
   t.after(() => rm(f.dir, { recursive: true, force: true }));

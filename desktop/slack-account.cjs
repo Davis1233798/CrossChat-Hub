@@ -154,15 +154,22 @@ function createSlackAccountService({ pkce, userApi, safeStorage, filePath, clien
     if (closed) return safeStatus('disconnected');
     if (disconnectNeedsRetry) return safeStatus('disconnect-incomplete');
     if (!pkce?.isConfigured) { state = 'unavailable'; return safeStatus(state, 'slack-oauth-not-configured'); }
-    if (!storageAvailable) {
-      try { storageAvailable = await safeStorage.isAsyncEncryptionAvailable() === true; } catch { storageAvailable = false; }
-    }
-    if (!storageAvailable) { state = 'secure-storage-unavailable'; return safeStatus(state); }
     if (pending || state === 'connecting') return safeStatus('connecting');
     const current = ++generation;
     state = 'connecting';
-    const login = await pkce.begin();
-    if (current !== generation || closed) { login?.cancel?.(); return safeStatus('disconnected'); }
+    if (!storageAvailable) {
+      try { storageAvailable = await safeStorage.isAsyncEncryptionAvailable() === true; } catch { storageAvailable = false; }
+      if (closed || current !== generation || disconnectNeedsRetry) return safeStatus(state);
+    }
+    if (closed || current !== generation || disconnectNeedsRetry) return safeStatus(state);
+    if (!storageAvailable) { state = 'secure-storage-unavailable'; return safeStatus(state); }
+    let login;
+    try { login = await pkce.begin(); }
+    catch {
+      if (!closed && current === generation && !disconnectNeedsRetry) state = 'connect-failed';
+      return safeStatus(state);
+    }
+    if (closed || current !== generation || disconnectNeedsRetry) { login?.cancel?.(); return safeStatus(state); }
     if (login.status !== 'ready' || !isFixedAuthorizeUrl(login.authorizeUrl, { clientId, registeredLoopbackRedirectUri })) {
       state = login.status === 'unavailable' ? 'unavailable' : 'connect-failed';
       return safeStatus(state, login.reason || 'invalid-authorize-url');
