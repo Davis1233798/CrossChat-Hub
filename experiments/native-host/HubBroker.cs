@@ -46,6 +46,12 @@ internal static class HubBroker {
   static Button lineRecoveryButton;
 #endif
   static bool attached, finish, closingRequested, resized, rootSurvived, chatSurvived, chatRestored, chatClosed, controllerExited, dpiEqual;
+#if LINE_PRODUCT
+  static bool closeRequestInFlight;
+#endif
+#if LINE_PRODUCT_FIXTURE
+  static bool failNextFixtureRestore;
+#endif
   static string error;
   static bool mixed; static int previousHosting=-1, rootHosting=-1,paneHosting=-1;
   static string hubDpiBefore,hubDpiAfter,fixtureDpiBefore,fixtureDpiAfter,hubDpiRestored,fixtureDpiRestored;
@@ -78,6 +84,10 @@ internal static class HubBroker {
   static bool lineAttached, lineVisible;
 #if LINE_PRODUCT
   static long lastSequence, currentSequence;
+  static void RequestHostClose() {
+    if(closeRequestInFlight)return;
+    closeRequestInFlight=true;closingRequested=true;Emit("close-request");
+  }
 #endif
   static void Trace(string stage) { File.AppendAllText(resultPath+".trace",DateTime.UtcNow.ToString("O")+" "+stage+Environment.NewLine); }
   static void Emit(string type, params object[] fields) {
@@ -273,6 +283,9 @@ internal static class HubBroker {
   static void DetachProductHost(Dictionary<string,object> d) {
     if(d.Count!=4||!d.ContainsKey("sequence"))throw new Exception("Invalid detach-host request");
     if(lineAttached) {
+#if LINE_PRODUCT_FIXTURE
+      if(failNextFixtureRestore) { failNextFixtureRestore=false;if(lineRecoveryButton!=null)lineRecoveryButton.Visible=true;Emit("line-restore-failed","restored",false,"alive",LineAlive,"message","Owned fixture injected a one-time restore failure.");return; }
+#endif
       try { RestoreFixture(); } catch(Exception ex) { error="LINE restore failed: "+ex.Message; }
       if(!chatRestored) { error=error??"LINE restoration read-back did not match the saved window state.";if(lineRecoveryButton!=null)lineRecoveryButton.Visible=true;Emit("line-restore-failed","restored",false,"alive",LineAlive,"message",error);return; }
       lineAttached=false;lineVisible=false;chatChanged=false;
@@ -443,6 +456,11 @@ internal static class HubBroker {
     else if(type=="line-show") { SetProductLineVisible(d,true); }
     else if(type=="line-hide") { SetProductLineVisible(d,false); }
     else if(type=="detach-host") { DetachProductHost(d); }
+    else if(type=="close-request-cancel"&&d.Count==4) { closeRequestInFlight=false;closingRequested=false;Emit("close-request-cancelled","released",true); }
+#if LINE_PRODUCT_FIXTURE
+    else if(type=="fixture-root-close"&&d.Count==4) { root.Close();root.Close();Emit("fixture-root-close","accepted",true); }
+    else if(type=="fixture-fail-next-restore"&&d.Count==4) { failNextFixtureRestore=true;Emit("fixture-fail-next-restore","accepted",true); }
+#endif
 #endif
     else if(type=="resize-check" && d.Count==3 && attached) {
       root.Size=new Size(root.Width+80,root.Height+40); Layout();
@@ -510,9 +528,16 @@ internal static class HubBroker {
 #if LINE_STUDY
       if(!chatRestored&&chatChanged) {e.Cancel=true;DetachLine();return;}
 #elif LINE_PRODUCT
-      if(chatChanged&&!chatRestored) {e.Cancel=true;status.Text="LINE is not restored. Keep this root open and retry LINE restoration.";return;}
+      if(chatChanged&&!chatRestored) {e.Cancel=true;status.Text="LINE is not restored. Keep this root open and retry LINE restoration.";if(!controller.HasExited)RequestHostClose();return;}
 #endif
-      if(!finish && !controller.HasExited) { e.Cancel=true; if(!closingRequested){closingRequested=true;Emit("close-request");} }
+      if(!finish && !controller.HasExited) {
+        e.Cancel=true;
+#if LINE_PRODUCT
+        RequestHostClose();
+#else
+        if(!closingRequested){closingRequested=true;Emit("close-request");}
+#endif
+      }
     };
     root.FormClosed+=delegate {Trace("root closed finish="+finish);};
     var timer=new System.Windows.Forms.Timer { Interval=100 };

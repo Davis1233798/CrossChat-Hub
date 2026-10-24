@@ -12,7 +12,7 @@ const binary = path.join(__dirname, '..', 'build', 'bin', 'native-host', 'Produc
 if (!fs.existsSync(binary)) throw new Error('Build native helpers before running the owned fixture smoke');
 const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'crosschat-native-line-'));
 const nonce = crypto.randomBytes(24).toString('hex');
-let window, child, sequence = 0, output = '', settled = false, timer;
+let window, child, sequence = 0, output = '', settled = false, timer, closeRequestCount = 0;
 const pending = new Map();
 function send(type, fields = {}) {
   const current = ++sequence;
@@ -66,11 +66,28 @@ async function run() {
             return send('line-show');
           }).then(result => {
             if (result.type !== 'line-visibility' || result.visible !== true || result.verified !== true) throw new Error('Owned fixture show/readback failed');
+            return send('fixture-fail-next-restore');
+          }).then(result => {
+            if (result.type !== 'fixture-fail-next-restore' || result.accepted !== true) throw new Error('Owned fixture restore-failure setup failed');
+            return send('fixture-root-close');
+          }).then(result => {
+            if (result.type !== 'fixture-root-close' || result.accepted !== true || closeRequestCount !== 1) throw new Error('Repeated root close did not emit exactly one close-request');
+            return send('detach-host');
+          }).then(result => {
+            if (result.type !== 'line-restore-failed' || result.restored !== false) throw new Error('Owned fixture restore-failure response was not retained for retry');
+            return send('close-request-cancel');
+          }).then(result => {
+            if (result.type !== 'close-request-cancelled' || result.released !== true) throw new Error('Close-request retry release was not acknowledged');
+            return send('fixture-root-close');
+          }).then(result => {
+            if (result.type !== 'fixture-root-close' || result.accepted !== true || closeRequestCount !== 2) throw new Error('Root close retry did not emit one new close-request');
             return send('detach-host');
           }).then(result => {
             if (result.type !== 'host-detached' || result.restored !== true || result.lineAlive !== true) throw new Error('Owned fixture normal detach/readback failed');
             settled = true; clearTimeout(timer); child.stdin.end();
           }).catch(fail);
+      } else if (message.type === 'close-request') {
+        closeRequestCount++;
       } else {
         const request = pending.get(message.sequence);
         if (request) { pending.delete(message.sequence); request.resolve(message); }
@@ -80,7 +97,7 @@ async function run() {
   child.once('error', fail);
   child.once('exit', code => {
     if (!settled || code !== 0) { fail(new Error(`native helper exited before clean completion (${code})`)); return; }
-    window.destroy(); console.log('PASS: ProductBrokerFixture owned HWND attach/show/hide/detach readbacks; no LINE process used.'); app.exit(0);
+    window.destroy(); console.log('PASS: ProductBrokerFixture attach/show/hide/root-close/retry/detach readbacks; no LINE process used.'); app.exit(0);
   });
   timer = setTimeout(() => fail(new Error('owned fixture lifecycle timed out')), 30000);
 }

@@ -5,8 +5,8 @@ const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { createNativeLineBroker } = require('../desktop/native-line-broker.cjs');
 
-function harness({ timeoutMs = 100, drop = new Set(), restoreFailure = false } = {}) {
-  const children = [], commands = [];
+function harness({ timeoutMs = 100, drop = new Set(), defer = new Set(), restoreFailure = false } = {}) {
+  const children = [], commands = [], deferred = [];
   let closeNotice = 0;
   function spawnProcess(_binary, args) {
     const child = new EventEmitter();
@@ -16,10 +16,12 @@ function harness({ timeoutMs = 100, drop = new Set(), restoreFailure = false } =
       for (const line of bytes.toString('utf8').split('\n').filter(Boolean)) {
         const message = JSON.parse(line); commands.push(message);
         if (drop.has(message.type)) continue;
+        if (defer.has(message.type)) { deferred.push({ message, args, child }); continue; }
         const response = { v: 1, nonce: args[1], sequence: message.sequence };
         if (message.type === 'attach') Object.assign(response, { type: 'attached' });
         else if (message.type === 'line-attach') Object.assign(response, { type: 'line-attached', attached: true, alive: true });
         else if (message.type === 'line-show' || message.type === 'line-hide') Object.assign(response, { type: 'line-visibility', visible: message.type === 'line-show', verified: true });
+        else if (message.type === 'close-request-cancel') Object.assign(response, { type: 'close-request-cancelled', released: true });
         else if (message.type === 'detach-host') Object.assign(response, restoreFailure
           ? { type: 'line-restore-failed', restored: false, message: 'fixture restore rejected' }
           : { type: 'host-detached', restored: true });
@@ -39,7 +41,17 @@ function harness({ timeoutMs = 100, drop = new Set(), restoreFailure = false } =
     getScreen: () => ({ getDisplayMatching: () => ({ scaleFactor: 1 }) }),
   });
   broker.onStatus(event => { if (event.state === 'close-request') closeNotice++; });
-  return { broker, children, commands, get closeNotice() { return closeNotice; } };
+  return {
+    broker, children, commands,
+    release(type, fields = {}) {
+      const index = deferred.findIndex(item => item.message.type === type);
+      assert.notEqual(index, -1, `no deferred ${type} request`);
+      const [{ message, args, child }] = deferred.splice(index, 1);
+      const result = { v: 1, nonce: args[1], sequence: message.sequence, ...fields };
+      child.stdout.write(JSON.stringify(result) + '\n');
+    },
+    get closeNotice() { return closeNotice; },
+  };
 }
 const window = {
   getNativeWindowHandle() { const handle = Buffer.alloc(8); handle.writeBigUInt64LE(99n); return handle; },
@@ -102,4 +114,41 @@ test('unexpected host exit after attach remains blocked instead of claiming rest
   assert.equal(h.broker.active, false);
   assert.equal(h.broker.blocked, true);
   assert.equal(h.children[0].killCount, 0);
+});
+
+test('tab changes during deferred enable apply the latest visibility after attach', async () => {
+  const h = harness({ defer: new Set(['line-attach']) });
+  const enabling = h.broker.enable(window, witness);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(h.commands.some(command => command.type === 'line-attach'));
+  const switchingAway = h.broker.setLineVisible(false);
+  h.release('line-attach', { type: 'line-attached', attached: true, alive: true });
+  assert.equal((await enabling).state, 'enabled');
+  await switchingAway;
+  const visibilityCommands = h.commands.filter(command => command.type === 'line-show' || command.type === 'line-hide');
+  assert.equal(visibilityCommands.at(-1).type, 'line-hide');
+  assert.equal(h.children[0].killCount, 0);
+});
+
+test('failed root-close restoration releases the close request so the user can retry', async () => {
+  const h = harness({ restoreFailure: true });
+  await h.broker.enable(window, witness);
+  const failed = await h.broker.detachAndRestoreHub();
+  assert.equal(failed.restored, false);
+  assert.equal(await h.broker.releaseCloseRequest(), true);
+  assert.deepEqual(h.commands.slice(-2).map(command => command.type), ['detach-host', 'close-request-cancel']);
+  assert.equal(h.children[0].killCount, 0);
+});
+
+test('a reattached host reapplies the current tab visibility from a fresh host generation', async () => {
+  const h = harness();
+  await h.broker.enable(window, witness);
+  await h.broker.setLineVisible(false);
+  assert.deepEqual(await h.broker.detachAndRestoreHub(), { restored: true });
+  await h.broker.setLineVisible(false);
+  await h.broker.enable(window, witness);
+  const recent = h.commands.slice(-3).map(command => command.type);
+  assert.deepEqual(recent, ['attach', 'line-attach', 'line-hide']);
+  assert.equal(h.children.length, 2);
+  assert.equal(h.children.every(child => child.killCount === 0), true);
 });

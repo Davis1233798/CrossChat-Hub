@@ -204,7 +204,7 @@ function chooseTab(id) {
   if (!mainWindow || mainWindow.isDestroyed() || closing) return;
   if (currentView) { mainWindow.contentView.removeChildView(currentView); currentView = null; }
   currentId = id;
-  if (lineBroker?.enabled) {
+  if (lineBroker) {
     lineBroker.setLineVisible(id === 'line').catch(error => announce('line', 'restore-error', error.message));
   }
   announce(id, 'selected');
@@ -222,6 +222,7 @@ async function requestQuit() {
   if (lineBroker?.active) {
     const restored = await lineBroker.detachAndRestoreHub().catch(error => ({ restored: false, detail: error.message }));
     if (!restored.restored) {
+      await lineBroker.releaseCloseRequest().catch(() => false);
       quitRequested = false;
       announce('line', 'restore-error', restored.detail || 'LINE 尚未確認還原；視窗保持開啟，請重試。');
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();

@@ -10,6 +10,7 @@ const { StringDecoder } = require('node:string_decoder');
 function createNativeLineBroker({ binaryPath, spawnProcess = spawn, timeoutMs = 15000, platform = process.platform, getScreen = () => require('electron').screen, getStartTicks = null, makeTempDir = fs.mkdtempSync } = {}) {
   let child = null, nonce = null, sequence = 0, output = '', decoder = null, starting = null;
   let pending = new Map(), attached = false, lineEnabled = false, expectedExit = false, blocked = false;
+  let desiredVisible = true, visibilityVersion = 0, appliedVisibilityVersion = 0, visibilityQueue = Promise.resolve();
   let readyResolve = null, readyReject = null;
   const listeners = new Set();
   function notify(state, detail = '') { for (const listener of listeners) listener({ state, detail }); }
@@ -36,7 +37,7 @@ function createNativeLineBroker({ binaryPath, spawnProcess = spawn, timeoutMs = 
     request.resolve(message);
   }
   function send(type, fields = {}) {
-    if (!child || !child.stdin.writable || (blocked && type !== 'detach-host')) return Promise.reject(new Error('Native LINE broker is unavailable; retry restoration first.'));
+    if (!child || !child.stdin.writable || (blocked && type !== 'detach-host' && type !== 'close-request-cancel')) return Promise.reject(new Error('Native LINE broker is unavailable; retry restoration first.'));
     const currentSequence = ++sequence;
     const message = { v: 1, nonce, sequence: currentSequence, type, ...fields };
     return new Promise((resolve, reject) => {
@@ -56,12 +57,28 @@ function createNativeLineBroker({ binaryPath, spawnProcess = spawn, timeoutMs = 
     let index;
     while ((index = output.indexOf('\n')) >= 0) { const line = output.slice(0, index); output = output.slice(index + 1); if (line.length <= 8192) onLine(line); else { blocked = true; notify('error', 'Native host response exceeded the safety limit.'); } }
   }
+  function applyDesiredVisibility() {
+    const work = visibilityQueue.then(async () => {
+      while (attached && lineEnabled && appliedVisibilityVersion !== visibilityVersion) {
+        const version = visibilityVersion, visible = desiredVisible;
+        const response = await send(visible ? 'line-show' : 'line-hide');
+        if (response.type !== 'line-visibility' || response.verified !== true || response.visible !== visible) {
+          blocked = true; notify('error', 'LINE 視窗狀態未能確認；請還原後重試。');
+          throw new Error('Native LINE visibility was not verified');
+        }
+        appliedVisibilityVersion = version;
+      }
+      return true;
+    });
+    visibilityQueue = work.catch(() => {});
+    return work;
+  }
   async function start(window, witness) {
     if (child) throw new Error('Native LINE host is already active');
     if (platform !== 'win32' || !path.isAbsolute(binaryPath || '')) throw new Error('Windows native LINE host is unavailable');
     const folder = makeTempDir(path.join(os.tmpdir(), 'crosschat-native-line-'));
     const resultPath = path.join(folder, 'broker-result.json');
-    nonce = randomBytes(24).toString('hex'); sequence = 0; output = ''; decoder = new StringDecoder('utf8'); blocked = false; expectedExit = false;
+    nonce = randomBytes(24).toString('hex'); sequence = 0; output = ''; decoder = new StringDecoder('utf8'); blocked = false; expectedExit = false; appliedVisibilityVersion = 0;
     const handle = window.getNativeWindowHandle();
     const hwnd = (handle.length === 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE())).toString();
     const minimum = window.getMinimumSize();
@@ -92,11 +109,13 @@ function createNativeLineBroker({ binaryPath, spawnProcess = spawn, timeoutMs = 
       if (handleResult.type !== 'attached') throw new Error('Native host did not attach the Hub');
       attached = true; notify('host-attached');
       const result = await send('line-attach', { lineWitness: witness });
-      if (result.type === 'line-attached' && result.attached && result.alive) { lineEnabled = true; blocked = false; notify('enabled'); return { state: 'enabled' }; }
+      if (result.type === 'line-attached' && result.attached && result.alive) {
+        lineEnabled = true; blocked = false; await applyDesiredVisibility(); notify('enabled'); return { state: 'enabled' };
+      }
       blocked = result.type === 'line-restore-failed';
       notify(blocked ? 'restore-error' : 'attach-error', result.message || 'LINE could not be embedded.');
       return { state: blocked ? 'restore-error' : 'attach-error', detail: result.message || '' };
-    } catch (error) { readyReject?.(error); readyResolve = null; readyReject = null; if (child && attached) blocked = false; else blocked = true; notify('error', error.message); throw error; }
+    } catch (error) { readyReject?.(error); readyResolve = null; readyReject = null; if (!child || !attached) blocked = true; notify('error', error.message); throw error; }
   }
   async function controllerStartTicks(pid) {
     const { execFileSync } = require('node:child_process');
@@ -116,18 +135,23 @@ function createNativeLineBroker({ binaryPath, spawnProcess = spawn, timeoutMs = 
       }
       if (!attached || blocked) throw new Error('Native LINE host needs restoration before another attach attempt.');
       const result = await send('line-attach', { lineWitness: witness });
-      if (result.type === 'line-attached' && result.attached && result.alive) { lineEnabled = true; notify('enabled'); return { state: 'enabled' }; }
+      if (result.type === 'line-attached' && result.attached && result.alive) {
+        lineEnabled = true; await applyDesiredVisibility(); notify('enabled'); return { state: 'enabled' };
+      }
       blocked = result.type === 'line-restore-failed';
       notify(blocked ? 'restore-error' : 'attach-error', result.message || 'LINE could not be embedded.');
       return { state: blocked ? 'restore-error' : 'attach-error', detail: result.message || '' };
     },
     async setLineVisible(visible) {
-      const response = await send(visible ? 'line-show' : 'line-hide');
-      if (response.type !== 'line-visibility' || response.verified !== true || response.visible !== visible) {
-        blocked = true; notify('error', 'LINE 視窗狀態未能確認；請還原後重試。');
-        throw new Error('Native LINE visibility was not verified');
-      }
-      lineEnabled = true; return true;
+      desiredVisible = Boolean(visible); visibilityVersion++;
+      if (starting) await starting;
+      if (!attached || !lineEnabled) return true;
+      return applyDesiredVisibility();
+    },
+    async releaseCloseRequest() {
+      if (!child) return false;
+      const response = await send('close-request-cancel');
+      return response.type === 'close-request-cancelled' && response.released === true;
     },
     async detachAndRestoreHub() {
       if (starting) await starting.catch(() => {});
