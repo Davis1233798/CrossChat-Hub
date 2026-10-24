@@ -6,7 +6,7 @@ const { requireNativeHelper } = require('../desktop/native-helper-paths.cjs');
 
 const resourcesPath = process.argv[2];
 if (!path.isAbsolute(resourcesPath ?? '')) throw new Error('Pass the absolute packaged resources directory, such as dist/win-unpacked/resources');
-for (const name of ['LineWitness.exe', 'ReadOnlyRouting.exe']) {
+for (const name of ['LineWitness.exe', 'ReadOnlyRouting.exe', 'ProductBroker.exe']) {
   const executable = requireNativeHelper(path.join(resourcesPath, 'native', name));
   const result = spawnSync(executable, ['--self-test'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
   assert.equal(result.error, undefined, `${name} must start: ${result.error?.message}`);
@@ -17,5 +17,9 @@ for (const name of ['LineWitness.exe', 'ReadOnlyRouting.exe']) {
   assert.equal(record.ok, true);
   assert.equal(record.protocol, 1);
   assert.match(record.runtime, /^\d+\.\d+/);
+  if (name === 'ProductBroker.exe') {
+    assert.equal(record.helperKind, 'line-product-broker', 'ProductBroker must identify its exact helper kind');
+    assert.equal(record.protocol, 1, 'ProductBroker protocol version must match the expected version');
+  }
 }
-console.log('Packaged native helper resources and safe self-tests passed.');
+console.log('Native helper resources and safe self-tests passed.');

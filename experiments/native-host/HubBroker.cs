@@ -474,6 +474,20 @@ internal static class HubBroker {
     } else throw new Exception("Unexpected broker command");
   }
   [STAThread] static int Main(string[] args) {
+#if LINE_PRODUCT
+    // Keep this exact-argument protocol probe ahead of WinForms initialization,
+    // DPI hosting changes, process lookup, witness capture, and HWND access.
+    if(Array.IndexOf(args,"--self-test")>=0) {
+      if(args.Length!=1||args[0]!="--self-test")return 2;
+      try {
+        Console.SetOut(new StreamWriter(Console.OpenStandardOutput(),new System.Text.UTF8Encoding(false)) { AutoFlush=true });
+        var probe=json.DeserializeObject(json.Serialize(new {v=1,type="ready",protocol=1})) as Dictionary<string,object>;
+        if(probe==null||Convert.ToInt32(probe["v"])!=1||Convert.ToInt32(probe["protocol"])!=1)return 1;
+        Console.WriteLine(json.Serialize(new {ok=true,protocol=1,runtime=Environment.Version.ToString(),helperKind="line-product-broker"}));
+        return 0;
+      } catch { return 1; }
+    }
+#endif
     Application.EnableVisualStyles();
     chatClosed=false;
     if(args.Length==2 && args[0]=="--fixture" && Regex.IsMatch(args[1],"^[a-f0-9]{48}$")) {
