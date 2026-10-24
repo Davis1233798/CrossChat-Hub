@@ -73,7 +73,10 @@ display labels never become platform account/chat/message IDs. The body stays
 private; the ledger stores neither body nor digest.
 `prepareSelection({selectionId, captureRevision, routeText})` requires only a
 destination route and uses the captured body unchanged. These selection APIs
-have no desktop IPC/UI entry yet. The same selection and exact destination
+are exposed only through the trusted shell's manual-forwarding mode. Source
+edits revoke the old capture and unexecuted drafts; the UI states that the
+source is manually declared and not platform-verified. Send remains disabled
+without a real destination adapter. The same selection and exact destination
 share a dedupe key; another destination requires a new explicit resolved preview.
 A new manual capture has a new ID, so separate copies of one original message
 cannot be deduplicated. Selection sources cannot carry forwarding traces or

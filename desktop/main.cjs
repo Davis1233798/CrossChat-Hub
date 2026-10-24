@@ -18,7 +18,7 @@ const brokerStudy = require('./native-broker-study.cjs').configureBrokerStudy(ap
 // This is not an API bridge: no password interception, cookie export, or
 // injection into a remote messenger is performed.
 const HEADER_HEIGHT = 116;
-const COMPOSER_HEIGHT = 184;
+const COMPOSER_HEIGHT = 230;
 const singleInstance = app.requestSingleInstanceLock();
 let mainWindow = null;
 let currentId = null;

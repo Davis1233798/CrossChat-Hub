@@ -28,6 +28,28 @@ app.whenReady().then(async () => {
   })()`);
   if (composer.status !== 'unsupported' || composer.member !== '小明' || composer.attempt !== 'unsupported' ||
       !composer.privatePlan || !composer.disabled || !composer.focused || composer.bottom > composer.height) throw new Error('Composer IPC/private unsupported state failed');
+  const selection = await window.webContents.executeJavaScript(`(async () => {
+    const api=window.crosschatDesktop;
+    const capture=await api.captureSelection({text:'隔離測試單則文字',platform:'line',chatName:'合成來源'});
+    const ref={selectionId:capture.selectionId,captureRevision:capture.captureRevision};
+    const preview=await api.prepareSelection({...ref,routeText:'@slack:合成目的'});
+    const malformed=await api.captureSelection({text:'x',platform:'line',chatName:'x',selectionId:'fake'});
+    const mixed=await api.prepareSelection({...ref,routeText:'@slack:目的 冒充原文'});
+    const noSend=await api.executeDraft(preview.draftId,preview.revision);
+    await api.revokeSelection(ref);
+    const revoked=await api.executeDraft(preview.draftId,preview.revision);
+    document.getElementById('compose-mode').value='selection';
+    document.getElementById('compose-mode').dispatchEvent(new Event('change'));
+    document.getElementById('compose-text').value='隔離UI原文';
+    document.getElementById('source-chat').value='合成來源群';
+    document.getElementById('compose-route').value='@slack:合成頻道';
+    document.getElementById('compose-preview').click();
+    return {status:preview.status,text:preview.preview?.text,provenance:preview.source?.provenance,
+      malformed:malformed.status,mixed:mixed.status,noSend:noSend.status,revoked:revoked.status};
+  })()`);
+  if (selection.status!=='unsupported'||selection.text!=='隔離測試單則文字'||selection.provenance!=='user-confirmed-selection'||selection.malformed!=='rejected'||selection.mixed!=='rejected'||selection.noSend!=='unsupported'||selection.revoked!=='rejected') throw new Error('Selection IPC isolation failed');
+  await delay(100);
+  if (!await window.webContents.executeJavaScript('document.getElementById("compose-status").textContent.includes("人工確認，未經平台驗證") && document.getElementById("compose-status").textContent.includes("合成頻道") && document.getElementById("compose-send").disabled')) throw new Error('Selection renderer preview failed');
   const selected = () => window.webContents.executeJavaScript('document.querySelector("[data-tab][aria-selected=true]").dataset.tab');
   const choose = async key => {
     window.webContents.sendInputEvent({ type: 'keyDown', keyCode: key, modifiers: ['control'] });

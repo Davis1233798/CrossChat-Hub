@@ -79,6 +79,14 @@ export function createForwardingDrafts({ adapterFor = () => null, ledger, now = 
       // selection+exact target, allowing a different explicitly chosen target.
       return prepare({ text: input.routeText }, selected);
     },
+    revokeSelection(input) {
+      if (!input || Object.keys(input).some(k => !['selectionId', 'captureRevision'].includes(k))) return rejected('invalid-selection-reference');
+      const selected = selections.get(input.selectionId);
+      if (!selected || selected.source.captureRevision !== input.captureRevision) return rejected('selection-unavailable');
+      selections.delete(input.selectionId);
+      for (const [id, draft] of drafts) if (draft.source?.selectionId === input.selectionId && !draft.executing) drafts.delete(id);
+      return { status: 'revoked' };
+    },
     async execute(id, revision) {
       const draft = lookup(id, revision);
       if (!draft || draft.executing || draft.terminal) return rejected('draft-unavailable');

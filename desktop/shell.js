@@ -82,24 +82,54 @@
   const composeText = document.getElementById('compose-text');
   const composeStatus = document.getElementById('compose-status');
   const previewButton = document.getElementById('compose-preview');
-  let draft = null, editVersion = 0;
-  composeText.addEventListener('input', () => {
+  const mode = document.getElementById('compose-mode');
+  const sourcePlatform = document.getElementById('source-platform');
+  const sourceChat = document.getElementById('source-chat');
+  const routeInput = document.getElementById('compose-route');
+  let draft = null, capture = null, editVersion = 0;
+  function revoke(ref) { if (ref) void window.crosschatDesktop.revokeSelection(ref).catch(() => {}); }
+  function changed() {
     editVersion++;
+    revoke(capture); capture = null; draft = null;
     composeStatus.textContent = '內容已變更，請重新預覽目的地。尚未發送。';
+  }
+  for (const input of [composeText, sourceChat, routeInput]) input.addEventListener('input', changed);
+  sourcePlatform.addEventListener('change', changed);
+  mode.addEventListener('change', () => {
+    changed();
+    const forwarding = mode.value === 'selection';
+    document.getElementById('compose-source').hidden = !forwarding;
+    document.getElementById('compose-route-row').hidden = !forwarding;
+    document.getElementById('compose-text-label').textContent = forwarding ? '貼入要轉發的單則原文' : '跨軟體訊息';
+    document.getElementById('compose-help').textContent = forwarding ? '請自行核對來源及原文；預覽不會發送訊息' : '例如 @line:群組名:人名 要說的話；名稱含空白請用雙引號';
+    composeText.placeholder = forwarding ? '貼入你選擇的單則文字；不會自動讀取聊天記錄' : '@line:群組名 訊息內容';
   });
   previewButton.addEventListener('click', async () => {
     const version = editVersion;
     previewButton.disabled = true;
     try {
-      const input = { text: composeText.value, ...(draft ? { draftId: draft.draftId, revision: draft.revision } : {}) };
-      const result = await window.crosschatDesktop.prepareDraft(input);
-      if (result.draftId) draft = { draftId: result.draftId, revision: result.revision };
+      let result;
+      if (mode.value === 'selection') {
+        if (!capture) {
+          const saved = await window.crosschatDesktop.captureSelection({ text: composeText.value, platform: sourcePlatform.value, chatName: sourceChat.value });
+          if (saved.status !== 'captured') { composeStatus.textContent = '請填寫來源聊天室並貼入單則文字。未發送。'; return; }
+          const ref = { selectionId: saved.selectionId, captureRevision: saved.captureRevision };
+          if (version !== editVersion) { revoke(ref); return; }
+          capture = ref;
+        }
+        result = await window.crosschatDesktop.prepareSelection({ ...capture, routeText: routeInput.value });
+      } else {
+        const input = { text: composeText.value, ...(draft ? { draftId: draft.draftId, revision: draft.revision } : {}) };
+        result = await window.crosschatDesktop.prepareDraft(input);
+      }
       if (version !== editVersion) return;
+      if (result.draftId) draft = { draftId: result.draftId, revision: result.revision };
       const p = result.preview;
-      if (p) composeStatus.textContent = `${p.platform} · 群組「${p.chatName}」${p.memberName ? ` · 提及「${p.memberName}」` : ''}。個人聊天傳送尚未支援，未發送。`;
+      const source = result.source ? `來源：${result.source.platform}「${result.source.chatName}」（人工確認，未經平台驗證） → ` : '';
+      if (p) composeStatus.textContent = `${source}${p.platform}「${p.chatName}」${p.memberName ? ` · 提及「${p.memberName}」` : ''}。此平台尚未接通傳送，未發送。`;
       else {
         if (result.status === 'rejected') draft = null;
-        composeStatus.textContent = '無法解析目的地，請使用 @line:群組名[:人名] 訊息。未發送。';
+        composeStatus.textContent = mode.value === 'selection' ? '請只填目的地 @平台:聊天室[:人名]，原文由來源欄保留。未發送。' : '無法解析目的地，請使用 @line:群組名[:人名] 訊息。未發送。';
       }
     } catch { composeStatus.textContent = '無法預覽目的地，未發送。'; }
     finally { previewButton.disabled = false; }

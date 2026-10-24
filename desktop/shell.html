@@ -38,8 +38,11 @@
   <section id="profile-state" class="native-panel" hidden><h2 id="profile-state-title"></h2><p id="profile-state-detail"></p></section>
 </main>
 <section id="composer" aria-label="跨軟體統一輸入">
-  <label for="compose-text">跨軟體訊息 <small>例如 @line:群組名:人名 要說的話；名稱含空白請用雙引號</small></label>
+  <div class="compose-mode"><label for="compose-mode">訊息模式</label><select id="compose-mode"><option value="compose">新訊息</option><option value="selection">轉發單則文字</option></select><small id="compose-help">例如 @line:群組名:人名 要說的話；名稱含空白請用雙引號</small></div>
+  <div id="compose-source" hidden><label>來源平台 <select id="source-platform"><option value="line">LINE</option><option value="slack">Slack</option><option value="telegram">Telegram</option><option value="discord">Discord</option><option value="whatsapp">WhatsApp</option></select></label><label>來源聊天室 <input id="source-chat" maxlength="512" placeholder="你確認的來源聊天室名稱"></label><span>人工貼入，來源未經平台驗證</span></div>
+  <label for="compose-text" id="compose-text-label">跨軟體訊息</label>
   <textarea id="compose-text" rows="2" maxlength="16000" placeholder="@line:群組名 訊息內容" spellcheck="false"></textarea>
+  <label id="compose-route-row" hidden>轉發目的地 <input id="compose-route" maxlength="1024" placeholder="@slack:頻道名（只填目的地，不填內容）"></label>
   <div class="compose-actions"><button type="button" id="compose-preview">預覽目的地</button><button type="button" id="compose-send" disabled>傳送（尚未支援）</button><span id="compose-status" role="status">目前可解析目的地；個人聊天傳送尚未接通，不會發出訊息。</span></div>
 </section>
 </body>

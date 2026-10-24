@@ -14,5 +14,11 @@ function registerForwardingIpc(ipcMain, getWindow, shellUrl, drafts) {
     if (typeof id !== 'string' || !Number.isSafeInteger(revision) || revision < 1) throw new Error('Invalid draft reference');
     return drafts.execute(id, revision);
   });
+  for (const [channel, method] of [['selection-capture', 'captureSelection'], ['selection-prepare', 'prepareSelection'], ['selection-revoke', 'revokeSelection']]) {
+    ipcMain.handle(`crosschat:${channel}`, (event, input) => {
+      if (!trusted(event)) throw new Error('Untrusted composer sender');
+      return drafts[method](input);
+    });
+  }
 }
 module.exports = { registerForwardingIpc };
