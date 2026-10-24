@@ -18,11 +18,13 @@ function configureBrokerStudy(app) {
   const resultPath = path.join(profile, 'broker-result.json');
   const mode = process.env.CROSSCHAT_BROKER_TEST_MODE || 'manual';
   if (!['manual', 'normal', 'crash'].includes(mode)) throw new Error('Invalid broker test mode');
+  const injection = process.env.CROSSCHAT_BROKER_FAIL_AT || 'none';
+  if (!['none', 'after-hub-parent', 'after-fixture-parent', 'after-resize', 'stdio-eof'].includes(injection)) throw new Error('Invalid broker failure injection');
   const binary = path.join(__dirname, '..', 'build', 'bin', 'native-host', 'HubBroker.exe');
   if (!fs.existsSync(binary) || !fs.statSync(binary).isFile()) throw new Error('Build the fixed HubBroker.exe before enabling broker study');
-  let server, origin, sidecar, attached = false, shuttingDown = false;
+  let server, origin, sidecar, attached = false, shuttingDown = false, failed = false;
   const urlPath = '/' + crypto.randomBytes(20).toString('hex');
-  const evidence = { profile, resultPath, mode, controllerPid: process.pid };
+  const evidence = { profile, resultPath, mode, injection, controllerPid: process.pid };
   fs.writeFileSync(path.join(profile, 'study.json'), JSON.stringify(evidence));
   console.log('CROSSCHAT_BROKER_STUDY ' + JSON.stringify(evidence));
   function write(type, fields = {}) {
@@ -50,19 +52,31 @@ function configureBrokerStudy(app) {
     async attach(window, quit) {
       // Independent process group: controller console teardown must not kill
       // the root-owning broker before it can restore its synthetic child.
-      sidecar = spawn(binary, [String(process.pid), nonce, resultPath, mode], { stdio: ['pipe', 'pipe', 'pipe'], detached: true, windowsHide: false });
+      sidecar = spawn(binary, [String(process.pid), nonce, resultPath, mode, injection], { stdio: ['pipe', 'pipe', 'pipe'], detached: true, windowsHide: false });
       sidecar.stderr.on('data', bytes => console.error('Native broker:', bytes.toString().slice(0, 512)));
       const handle = window.getNativeWindowHandle();
       const hwnd = (handle.length === 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE())).toString();
       let pending = '', ready = false;
       const done = new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Native broker handshake timed out')), 15000);
-        const fail = error => { clearTimeout(timer); reject(error); };
+        let settled = false;
+        const timer = setTimeout(() => {
+          failed = true;
+          // Closing input requests broker rollback BEFORE main rejects and may
+          // exit. Broker emits error only after restoring changed live HWNDs.
+          sidecar.stdin.end();
+        }, 15000);
+        const fail = error => { failed = true; clearTimeout(timer); if (!settled) { settled = true; reject(error); } };
+        const requestRollback = error => {
+          failed = true; clearTimeout(timer);
+          console.error('Native broker protocol failure; requesting rollback:', error.message);
+          if (sidecar.stdin.writable) sidecar.stdin.end();
+        };
+        sidecar.stdin.on('error', () => { /* EOF/exit is handled by sidecar acknowledgement or exit. */ });
         sidecar.once('error', fail);
-        sidecar.once('exit', code => { if (!attached) fail(new Error('Native broker exited before attachment: ' + code)); else if (!shuttingDown) quit(); });
+        sidecar.once('exit', code => { if (!attached) fail(new Error('Native broker exited before attachment: ' + code)); else if (!shuttingDown) { failed = true; quit(); } });
         sidecar.stdout.on('data', bytes => {
           pending += bytes.toString('utf8');
-          if (pending.length > 8192) { fail(new Error('Broker protocol overflow')); sidecar.stdin.end(); return; }
+          if (pending.length > 8192) { pending = ''; requestRollback(new Error('Broker protocol overflow')); return; }
           for (;;) {
             const index = pending.indexOf('\n'); if (index < 0) break;
             const line = pending.slice(0, index); pending = pending.slice(index + 1);
@@ -72,13 +86,29 @@ function configureBrokerStudy(app) {
               if (msg.v !== 1 || msg.nonce !== nonce) throw new Error('Broker handshake identity mismatch');
               if (msg.type === 'ready' && !ready) { ready = true; write('attach', { pid: process.pid, hwnd, startTicks: msg.startTicks }); }
               else if (msg.type === 'attached' && ready && !attached) {
-                attached = true; clearTimeout(timer); window.show(); resolve(msg);
-                if (mode !== 'manual') setTimeout(() => { write('resize-check'); setTimeout(() => mode === 'normal' ? quit() : process.exit(73), 1500); }, 1500);
+                attached = true; clearTimeout(timer); window.show(); settled = true; resolve(msg);
+                if (injection === 'stdio-eof') sidecar.stdin.end();
+                else if (mode !== 'manual') setTimeout(() => { write('resize-check'); setTimeout(() => mode === 'normal' ? quit() : process.exit(73), 1500); }, 1500);
               } else if (msg.type === 'close-request') quit();
               else if (msg.type === 'focus-hub') window.focus();
-              else if (msg.type === 'error') throw new Error('Broker rejected integration: ' + msg.message);
+              else if (msg.type === 'error') {
+                failed = true;
+                // An existing normal-close callback can otherwise race the
+                // startup rejection and return code 0. Exit only AFTER broker
+                // has acknowledged restoration of every changed live window.
+                if (msg.rollbackVerified === true) {
+                  console.error('Native broker failed; rollback verified:', msg.message);
+                  app.exit(1);
+                  return;
+                }
+                // Do not tear down the controller after incomplete rollback.
+                // Keep both processes alive for diagnosis with a failed state.
+                console.error('Native broker failed; rollback incomplete:', msg.message);
+                clearTimeout(timer);
+                continue;
+              }
               else if (msg.type !== 'resized') throw new Error('Unexpected broker protocol message');
-            } catch (error) { fail(error); if (attached && !shuttingDown) quit(); }
+            } catch (error) { requestRollback(error); }
           }
         });
       });
@@ -88,6 +118,7 @@ function configureBrokerStudy(app) {
     // In this mode external links, clearing account state and permissions must
     // not touch a real platform or open any authentication flow.
     get attached() { return attached; },
+    get failed() { return failed; },
   };
 }
 module.exports = { configureBrokerStudy };

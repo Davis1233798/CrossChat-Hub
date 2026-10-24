@@ -269,7 +269,7 @@ const quitSafely = createShutdown({
     await profileReset.waitForActive();
     await flushSessions([session.defaultSession, ...[...configuredPartitions].map(partition => session.fromPartition(partition))]);
   },
-  exit: code => app.exit(code),
+  exit: code => app.exit(brokerStudy?.failed ? 1 : code),
   onFailure: () => console.error('Desktop session persistence failed or timed out during shutdown.'),
 });
 async function openWindow() {

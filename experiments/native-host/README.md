@@ -204,7 +204,25 @@ Observed Windows x64 on 2026-10-24 after those corrections:
 The helper is included with source but the compiled .NET Framework sidecar is
 not packaged or released. Packaged/non-Windows flag activation fails closed;
 missing fixed binary fails before window/server startup. This remains a
-developer study: broker hard-crash safety, handshake failure after partial
-parenting, hung controller recovery, complete focus/DPI behavior, signed
+developer study: broker hard-crash safety, native failures beyond the injected
+rollback points, hung controller recovery, complete focus/DPI behavior, signed
 distribution and actual LINE tab integration are not established. Do not use
 this sidecar to attach existing LINE/Chrome windows.
+
+Partial attachment now saves Hub parent/style/placement/visibility and marks
+each HWND changed **before** mutation. Errors and unexpected stdin EOF roll back
+fixture then Hub, verify original state while Hub remains alive, and only then
+acknowledge failure. Hidden Hub visibility is restored separately from its
+placement (an unshown Electron HWND can still report `SW_SHOWNORMAL`). Failed
+rollback keeps the broker root alive; it cannot be closed while changed children
+remain attached. Main's existing shutdown preserves the study failure exit code.
+
+Run `node experiments/native-host/failure-smoke.mjs` after building. Four actual
+isolated Hub runs on 2026-10-24 injected failures after Hub parenting, fixture
+parenting, initial resize, and stdin EOF. Each retained `success=false` and its
+error, restored the live Hub and any changed fixture, closed the fixture
+normally, and exited controller with code 1. Reverse rollback order was checked;
+no parent was killed to manufacture recovery and no broker remained. Two unit
+tests cover absent-flag isolation and packaged-mode early rejection; ordinary
+desktop smoke also passed. These checks do not establish broker-hard-kill
+recovery or recovery from every possible native API failure.
