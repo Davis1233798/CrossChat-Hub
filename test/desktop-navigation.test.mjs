@@ -3,13 +3,46 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { navigationTarget, protectContents } = require('../desktop/navigation.cjs');
+const { navigationTarget, protectContents, slackWorkspaceWebUrl } = require('../desktop/navigation.cjs');
 const service = { id: 'slack', title: 'Slack', partition: 'persist:crosschat-slack' };
 class Contents extends EventEmitter {
   setWindowOpenHandler(handler) { this.open = handler; }
   getURL() { return 'https://accounts.google.com/login'; }
 }
 function event() { return { prevented: false, preventDefault() { this.prevented = true; } }; }
+
+test('Slack chooser desktop launch uses its verified official web fallback in the main tab', () => {
+  const source = 'https://workspace.slack.com/ssb/redirect?entry_point=your_workspaces&_gl=tracking';
+  assert.equal(slackWorkspaceWebUrl('slack', source), 'https://workspace.slack.com/');
+  assert.equal(slackWorkspaceWebUrl('slack', 'https://workspace.slack.com/ssb/redirect?entry_point=your_workspaces'), 'https://workspace.slack.com/');
+  const contents = new Contents();
+  const launched = [];
+  protectContents(contents, service, { openExternal() {}, onWorkspaceLaunch: url => launched.push(url) });
+  assert.deepEqual(contents.open({ url: source }), { action: 'deny' });
+  assert.deepEqual(launched, ['https://workspace.slack.com/']);
+  assert.equal(contents.open({ url: 'https://accounts.google.com/login' }).action, 'allow');
+  assert.equal(contents.open({ url: 'https://workspace.slack.com/ssb/redirect?entry_point=your_workspaces&code=oauth' }).action, 'allow');
+  assert.equal(launched.length, 1);
+});
+
+test('Slack fallback does not rewrite authentication, unrecognized or unsafe URLs', () => {
+  for (const url of [
+    'https://workspace.slack.com/ssb/redirect?entry_point=your_workspaces&code=oauth',
+    'https://workspace.slack.com/ssb/redirect?entry_point=your_workspaces&token=secret',
+    'https://workspace.slack.com/ssb/redirect?entry_point=your_workspaces&return_to=other',
+    'https://workspace.slack.com/ssb/redirect?entry_point=your_workspaces&entry_point=other',
+    'https://workspace.slack.com/ssb/redirect?entry_point=oauth',
+    'https://workspace.slack.com/ssb/redirect',
+    'https://workspace.slack.com/ssb/redirect/other?entry_point=your_workspaces',
+    'https://workspace.slack.com/ssb/redirect?entry_point=your_workspaces#token',
+    'https://app.slack.com/ssb/redirect?entry_point=your_workspaces',
+    'https://workspace.slack.com.evil.test/ssb/redirect?entry_point=your_workspaces',
+    'https://user:secret@workspace.slack.com/ssb/redirect?entry_point=your_workspaces',
+    'https://workspace.slack.com:8443/ssb/redirect?entry_point=your_workspaces',
+    'http://workspace.slack.com/ssb/redirect?entry_point=your_workspaces',
+  ]) assert.equal(slackWorkspaceWebUrl('slack', url), null, url);
+  assert.equal(slackWorkspaceWebUrl('discord', 'https://workspace.slack.com/ssb/redirect?entry_point=your_workspaces'), null);
+});
 
 test('navigation separates official/auth origins, external links, and unsafe URLs', () => {
   for (const url of ['https://app.slack.com/client', 'https://workspace.slack.com/', 'https://accounts.google.com/login']) {

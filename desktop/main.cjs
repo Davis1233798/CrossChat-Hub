@@ -125,6 +125,10 @@ function tabView(service) {
       if (response === 1 && !closing) await shell.openExternal(url);
     } catch { announce(service.id, 'external-error'); }
     finally { externalPromptPending = false; }
+  }, onWorkspaceLaunch: url => {
+    if (closing || wc.isDestroyed() || profileReset.isBlocked(service.id)) return;
+    chooseTab(service.id);
+    wc.loadURL(url).catch(error => report('failed', String(error.message)));
   }, onPopup: popup => {
     popupWindows.set(popup, service.id);
     popup.once('closed', () => popupWindows.delete(popup));

@@ -19,7 +19,23 @@ function navigationTarget(serviceId, value) {
   return 'external';
 }
 
-function protectContents(contents, service, { openExternal, onPopup = () => {} }) {
+// The workspace chooser's desktop-launch link stops at /ssb/redirect in an
+// embedded browser. Its official "use Slack in your browser" fallback is the
+// same workspace origin's root. Match only the observed chooser link, never
+// rewrite OAuth callbacks or unknown authentication parameters.
+function slackWorkspaceWebUrl(serviceId, value) {
+  if (serviceId !== 'slack' || navigationTarget(serviceId, value) !== 'internal') return null;
+  const url = new URL(value);
+  if (!/^[a-z0-9][a-z0-9-]*\.slack\.com$/.test(url.hostname) ||
+      ['app.slack.com', 'api.slack.com', 'slack.slack.com'].includes(url.hostname) ||
+      url.pathname !== '/ssb/redirect' || url.hash ||
+      url.searchParams.getAll('entry_point').length !== 1 ||
+      url.searchParams.get('entry_point') !== 'your_workspaces' ||
+      [...url.searchParams.keys()].some(key => !['entry_point', '_gl'].includes(key))) return null;
+  return `${url.origin}/`;
+}
+
+function protectContents(contents, service, { openExternal, onPopup = () => {}, onWorkspaceLaunch }) {
   const navigate = (event, url, _inPlace, isMainFrame = true) => {
     if (!isMainFrame) return;
     const target = navigationTarget(service.id, url);
@@ -30,6 +46,11 @@ function protectContents(contents, service, { openExternal, onPopup = () => {} }
   contents.on('will-navigate', navigate);
   contents.on('will-redirect', navigate);
   contents.setWindowOpenHandler(({ url }) => {
+    const workspace = slackWorkspaceWebUrl(service.id, url);
+    if (workspace && onWorkspaceLaunch) {
+      onWorkspaceLaunch(workspace);
+      return { action: 'deny' };
+    }
     const target = navigationTarget(service.id, url);
     if (target !== 'internal') {
       if (target === 'external') openExternal(url);
@@ -45,7 +66,7 @@ function protectContents(contents, service, { openExternal, onPopup = () => {} }
   });
   contents.on('did-create-window', popup => {
     onPopup(popup);
-    protectContents(popup.webContents, service, { openExternal, onPopup });
+    protectContents(popup.webContents, service, { openExternal, onPopup, onWorkspaceLaunch });
     // An authentication origin must be visible even if a page supplies a
     // misleading document title. Include path neither here nor in logs.
     const updateTitle = () => {
@@ -57,4 +78,4 @@ function protectContents(contents, service, { openExternal, onPopup = () => {} }
     updateTitle();
   });
 }
-module.exports = { navigationTarget, protectContents };
+module.exports = { navigationTarget, protectContents, slackWorkspaceWebUrl };
