@@ -1,6 +1,7 @@
 # Developer CI only: installs and removes a build on a disposable Windows runner.
 # Never offer this script as an end-user installation or repair step.
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'windows-minidump-summary.ps1')
 $diagnosticRoot = $null
 foreach ($basePath in @($env:RUNNER_TEMP, [System.IO.Path]::GetTempPath()) | Where-Object { $_ } | Select-Object -Unique) {
     try {
@@ -30,6 +31,151 @@ function Save-SetupAttempts {
     $setupAttempts | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $diagnosticRoot 'setup-attempts.json') -Encoding utf8
 }
 
+function Start-WerLocalDumpCapture([string]$DumpFolder) {
+    if ($env:GITHUB_ACTIONS -ne 'true' -or -not $env:RUNNER_TEMP -or -not $diagnosticRoot) {
+        return [pscustomobject]@{ enabled = $false; reason = 'not-github-actions' }
+    }
+    $runnerTempFull = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
+    $diagnosticFull = [System.IO.Path]::GetFullPath($diagnosticRoot)
+    $dumpFolderFull = [System.IO.Path]::GetFullPath($DumpFolder)
+    if (-not $diagnosticFull.StartsWith($runnerTempFull, [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not $dumpFolderFull.StartsWith($runnerTempFull, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $dumpFolderFull.StartsWith(($diagnosticFull.TrimEnd('\') + '\'), [System.StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject]@{ enabled = $false; reason = 'diagnostics-outside-runner-temp' }
+    }
+
+    $keyPath = 'SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\' + $installer.Name
+    $parentPath = 'SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
+    $key = $null
+    $keyExisted = $false
+    $parentKeyExisted = $false
+    $saved = @{}
+    try {
+        $parentProbe = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($parentPath, $false)
+        $parentKeyExisted = $null -ne $parentProbe
+        if ($parentProbe) { $parentProbe.Dispose() }
+        $existing = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($keyPath, $true)
+        $keyExisted = $null -ne $existing
+        if ($existing) { $existing.Dispose() }
+        $key = [Microsoft.Win32.Registry]::LocalMachine.CreateSubKey($keyPath)
+        if (-not $key) { return [pscustomobject]@{ enabled = $false; reason = 'registry-unavailable' } }
+        $saved = @{}
+        foreach ($name in @('DumpFolder', 'DumpType', 'DumpCount')) {
+            $present = $key.GetValueNames() -contains $name
+            if ($present) {
+                $saved[$name] = [pscustomobject]@{
+                    present = $true
+                    value = $key.GetValue($name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                    kind = $key.GetValueKind($name)
+                }
+            } else { $saved[$name] = [pscustomobject]@{ present = $false; value = $null; kind = $null } }
+        }
+        $key.SetValue('DumpFolder', $DumpFolder, [Microsoft.Win32.RegistryValueKind]::ExpandString)
+        $key.SetValue('DumpType', 1, [Microsoft.Win32.RegistryValueKind]::DWord)
+        $key.SetValue('DumpCount', 1, [Microsoft.Win32.RegistryValueKind]::DWord)
+        $key.Dispose()
+        return [pscustomobject]@{
+            enabled = $true
+            reason = $null
+            keyPath = $keyPath
+            parentPath = $parentPath
+            keyExisted = $keyExisted
+            parentKeyExisted = $parentKeyExisted
+            saved = $saved
+        }
+    } catch {
+        if ($key) {
+            try {
+                foreach ($name in @('DumpFolder', 'DumpType', 'DumpCount')) {
+                    if ($saved.ContainsKey($name)) {
+                        $savedValue = $saved[$name]
+                        if ($savedValue.present) { $key.SetValue($name, $savedValue.value, $savedValue.kind) }
+                        else { $key.DeleteValue($name, $false) }
+                    }
+                }
+                $key.Dispose()
+                $key = $null
+                if (-not $keyExisted) {
+                    [Microsoft.Win32.Registry]::LocalMachine.DeleteSubKey($keyPath, $false)
+                    if (-not $parentKeyExisted) {
+                        $parent = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($parentPath, $true)
+                        if ($parent) {
+                            $empty = (@($parent.GetValueNames()).Count -eq 0 -and @($parent.GetSubKeyNames()).Count -eq 0)
+                            $parent.Dispose()
+                            if ($empty) { [Microsoft.Win32.Registry]::LocalMachine.DeleteSubKey($parentPath, $false) }
+                        }
+                    }
+                }
+            } catch { if ($key) { $key.Dispose() } }
+        }
+        return [pscustomobject]@{ enabled = $false; reason = 'registry-unavailable' }
+    }
+}
+
+function Restore-WerLocalDumpCapture($Capture) {
+    if (-not $Capture -or -not $Capture.enabled) { return }
+    $key = $null
+    try {
+        $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($Capture.keyPath, $true)
+        if (-not $key) { return }
+        foreach ($name in @('DumpFolder', 'DumpType', 'DumpCount')) {
+            $savedValue = $Capture.saved[$name]
+            if ($savedValue.present) { $key.SetValue($name, $savedValue.value, $savedValue.kind) }
+            else { $key.DeleteValue($name, $false) }
+        }
+        $key.Dispose()
+        $key = $null
+        if (-not $Capture.keyExisted) {
+            [Microsoft.Win32.Registry]::LocalMachine.DeleteSubKey($Capture.keyPath, $false)
+            if (-not $Capture.parentKeyExisted) {
+                $parent = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($Capture.parentPath, $true)
+                if ($parent) {
+                    $empty = (@($parent.GetValueNames()).Count -eq 0 -and @($parent.GetSubKeyNames()).Count -eq 0)
+                    $parent.Dispose()
+                    if ($empty) { [Microsoft.Win32.Registry]::LocalMachine.DeleteSubKey($Capture.parentPath, $false) }
+                }
+            }
+        }
+    } catch {
+        Write-Warning 'Could not fully restore temporary WER LocalDumps settings.'
+    } finally {
+        if ($key) { $key.Dispose() }
+    }
+}
+
+function Get-WerDumpSummaryBestEffort([string]$DumpFolder) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $dump = Get-ChildItem -LiteralPath $DumpFolder -Filter '*.dmp' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($dump) {
+            $script:capturedWerDumpPath = $dump.FullName
+            try { return Get-MinidumpCrashSummary -Path $dump.FullName }
+            catch { return [pscustomobject]@{ status = 'unavailable' } }
+        }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    return [pscustomobject]@{ status = 'unavailable' }
+}
+
+function Remove-WerDumpFolderBestEffort([string]$DumpFolder, [string]$AttemptRoot, [string]$DumpPath) {
+    if (-not $DumpFolder -or -not $AttemptRoot) { return }
+    try {
+        $folderFull = [System.IO.Path]::GetFullPath($DumpFolder).TrimEnd('\')
+        $rootFull = [System.IO.Path]::GetFullPath($AttemptRoot).TrimEnd('\') + '\'
+        if (-not $folderFull.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) { return }
+        if ($DumpPath) {
+            $dumpFull = [System.IO.Path]::GetFullPath($DumpPath)
+            if ([System.IO.Path]::GetDirectoryName($dumpFull).TrimEnd('\') -eq $folderFull -and
+                [System.IO.Path]::GetExtension($dumpFull) -eq '.dmp') {
+                Remove-Item -LiteralPath $dumpFull -Force -ErrorAction SilentlyContinue
+            }
+        }
+        if (@(Get-ChildItem -LiteralPath $folderFull -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+            Remove-Item -LiteralPath $folderFull -Force -ErrorAction SilentlyContinue
+        }
+    } catch { }
+}
+
 function Invoke-Setup {
     $attemptNumber = $setupAttempts.Count + 1
     $stdoutPath = if ($diagnosticRoot) { Join-Path $diagnosticRoot "setup-$attemptNumber.stdout.txt" } else { $null }
@@ -47,9 +193,30 @@ function Invoke-Setup {
         launchError = $null
         stdoutPath = $stdoutPath
         stderrPath = $stderrPath
+        crashDump = [ordered]@{ status = 'not-captured' }
     }
     $setupAttempts.Add($attempt)
+    # WER dumps stay in a runner-temp sibling, outside the diagnostics artifact tree.
+    $werTempRoot = if ($diagnosticRoot -and $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_TEMP) {
+        Join-Path $env:RUNNER_TEMP ('crosschat-wer-private-' + [guid]::NewGuid().ToString('N'))
+    } else { $null }
+    $werFolder = if ($werTempRoot) { Join-Path $werTempRoot "attempt-$attemptNumber" } else { $null }
+    $werCapture = $null
+    $werFolderReady = $false
+    $werTempRootReady = $false
+    $script:capturedWerDumpPath = $null
     try {
+        if ($werFolder -and $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_TEMP) {
+            try {
+                New-Item -ItemType Directory -Path $werTempRoot -Force -ErrorAction Stop | Out-Null
+                $werTempRootReady = $true
+                New-Item -ItemType Directory -Path $werFolder -Force -ErrorAction Stop | Out-Null
+                $werFolderReady = $true
+                $werCapture = Start-WerLocalDumpCapture -DumpFolder $werFolder
+                if ($werCapture.enabled) { $attempt.crashDump.status = 'armed' }
+                else { $attempt.crashDump.status = 'unavailable'; $attempt.crashDump.reason = $werCapture.reason }
+            } catch { $attempt.crashDump.status = 'unavailable'; $attempt.crashDump.reason = 'capture-setup-failed' }
+        }
         $startParameters = @{
             FilePath = $installer.FullName
             ArgumentList = '/S'
@@ -62,11 +229,28 @@ function Invoke-Setup {
         }
         $setup = Start-Process @startParameters
         $attempt.exitCode = $setup.ExitCode
+        if ($setup.ExitCode -ne 0 -and $werCapture -and $werCapture.enabled) {
+            $summary = Get-WerDumpSummaryBestEffort -DumpFolder $werFolder
+            $attempt.crashDump = $summary
+        }
     } catch {
         $attempt.launchError = $_.Exception.Message
         throw
     } finally {
         $attempt.endedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+        try { Restore-WerLocalDumpCapture -Capture $werCapture } catch { Write-Warning 'Could not restore temporary WER LocalDumps settings.' }
+        if ($werFolderReady) {
+            try { Remove-WerDumpFolderBestEffort -DumpFolder $werFolder -AttemptRoot $werTempRoot -DumpPath $script:capturedWerDumpPath } catch { }
+        }
+        if ($werTempRootReady) {
+            try {
+                $privateRootFull = [System.IO.Path]::GetFullPath($werTempRoot)
+                $runnerRootFull = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
+                if ($privateRootFull.StartsWith($runnerRootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    Remove-Item -LiteralPath $privateRootFull -Force -ErrorAction SilentlyContinue
+                }
+            } catch { }
+        }
         try { Save-SetupAttempts } catch { Write-Warning 'Could not save installer attempt metadata.' }
     }
     if ($setup.ExitCode -ne 0) { throw "Silent installation failed with code $($setup.ExitCode)" }
