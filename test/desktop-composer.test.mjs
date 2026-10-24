@@ -21,6 +21,8 @@ test('preload IPC traverses main-frame guard into private draft service', async 
   assert.equal(result.status, 'unsupported'); assert.equal(result.preview.memberName, '小明');
   assert.equal(result.plan, undefined); assert.equal(result.target, undefined);
   assert.equal((await exposed.executeDraft(result.draftId, result.revision)).status, 'unsupported');
+  assert.equal((await exposed.captureObservedSelection({ platform: 'line', chatName: 'Human label' })).status, 'unsupported');
+  assert.equal((await exposed.captureObservedSelection({ platform: 'line', chatName: 'Human label', hwnd: 'forged' })).status, 'rejected');
   const capture = await exposed.captureSelection({ text: '單則原文', platform: 'line', chatName: '來源群' });
   const ref = { selectionId: capture.selectionId, captureRevision: capture.captureRevision };
   const forward = await exposed.prepareSelection({ ...ref, routeText: '@slack:目標頻道' });
@@ -34,7 +36,7 @@ test('preload IPC traverses main-frame guard into private draft service', async 
     { sender: {}, senderFrame: frame }, // remote view or popup
     { sender: contents, senderFrame: { url } }, // iframe, including same-origin
     { sender: contents, senderFrame: null },
-  ]) for (const channel of ['draft-prepare', 'selection-capture', 'selection-prepare', 'selection-revoke']) assert.throws(() => handlers.get(`crosschat:${channel}`)(bad, { text: 'x' }), /Untrusted/);
+  ]) for (const channel of ['draft-prepare', 'selection-capture', 'selection-observe', 'selection-prepare', 'selection-revoke']) assert.throws(() => handlers.get(`crosschat:${channel}`)(bad, { text: 'x' }), /Untrusted/);
   frame.url = 'https://example.com/';
   assert.throws(() => handlers.get('crosschat:draft-prepare')(event, { text: 'x' }), /Untrusted/);
 });

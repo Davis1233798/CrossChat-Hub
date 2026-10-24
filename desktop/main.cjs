@@ -303,7 +303,14 @@ if (singleInstance) {
   app.whenReady().then(async () => {
     if (brokerStudy) await brokerStudy.start();
     const { createForwardingDrafts } = await import('./forwarding-drafts.mjs');
+    const { createNativeSelectionClient } = await import('./native-selection-client.mjs');
+    const selectionClient = createNativeSelectionClient({
+      binaryPath: path.join(__dirname, '..', 'build', 'bin', 'native-routing', 'ReadOnlyRouting.exe'),
+      // Bind only after explicit main-owned window classification. No live
+      // account window is implicitly discovered or bound at startup.
+    });
     const drafts = createForwardingDrafts({
+      observeSelection: platform => selectionClient.observe(platform),
       ledger: createForwardingLedger(path.join(app.getPath('userData'), 'forwarding-ledger')),
       // No verified personal-chat UI adapter is registered yet.
     });

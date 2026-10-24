@@ -2,7 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { parseChatRoute, prepareForward, executeForward } from '../src/forwarding.mjs';
 
 // Main-process-only service. Renderer values are commands, never resolved plans.
-export function createForwardingDrafts({ adapterFor = () => null, ledger, now = Date.now, ttlMs = 300000, maxDrafts = 100 } = {}) {
+export function createForwardingDrafts({ adapterFor = () => null, observeSelection = async () => ({ status: 'unsupported', reason: 'selection-window-not-bound' }), ledger, now = Date.now, ttlMs = 300000, maxDrafts = 100 } = {}) {
   const drafts = new Map();
   const selections = new Map();
   const rejected = reason => ({ status: 'rejected', reason });
@@ -57,6 +57,18 @@ export function createForwardingDrafts({ adapterFor = () => null, ledger, now = 
     }
   return {
     prepare: input => prepare(input),
+    async captureObservedSelection(input) {
+      if (!input || typeof input !== 'object' || Object.keys(input).some(k => !['platform', 'chatName'].includes(k)) ||
+          !['line', 'slack', 'telegram', 'discord', 'whatsapp'].includes(input.platform) || typeof input.chatName !== 'string' || !input.chatName.trim() || input.chatName.length > 512) return rejected('invalid-observation-input');
+      let result;
+      try { result = await observeSelection(input.platform); } catch { return { status: 'unsupported', reason: 'selection-observation-unavailable' }; }
+      if (result?.status !== 'observed') return { status: 'unsupported', reason: result?.reason ?? 'selection-observation-unavailable' };
+      const capture = this.captureSelection({ text: result.text, platform: input.platform, chatName: input.chatName });
+      if (capture.status !== 'captured') return capture;
+      const selected = selections.get(capture.selectionId);
+      selected.source.provenance = 'ui-selected-text-unverified-origin';
+      return { ...capture, provenance: selected.source.provenance };
+    },
     captureSelection(input) {
       if (!input || typeof input !== 'object' || Object.keys(input).some(k => !['text', 'platform', 'chatName'].includes(k)) ||
           typeof input.text !== 'string' || !input.text.trim() || input.text.length > 16000 ||

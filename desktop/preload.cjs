@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('crosschatDesktop', Object.freeze({
   prepareDraft: input => ipcRenderer.invoke('crosschat:draft-prepare', input),
   executeDraft: (draftId, revision) => ipcRenderer.invoke('crosschat:draft-execute', draftId, revision),
   captureSelection: input => ipcRenderer.invoke('crosschat:selection-capture', input),
+  captureObservedSelection: input => ipcRenderer.invoke('crosschat:selection-observe', input),
   prepareSelection: input => ipcRenderer.invoke('crosschat:selection-prepare', input),
   revokeSelection: input => ipcRenderer.invoke('crosschat:selection-revoke', input),
 }));

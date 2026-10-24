@@ -47,7 +47,7 @@ const validChat = chat => chat && platforms.has(chat.platform) && exactId(chat.a
 const chatKey = chat => JSON.stringify([chat.platform, chat.accountId, chat.chatId]);
 const isCompose = source => source?.kind === 'compose' && exactId(source.draftId);
 const isSelection = source => source?.kind === 'selection' && exactId(source.selectionId) && source.captureRevision === 1 &&
-  platforms.has(source.platform) && exactId(source.chatName) && source.provenance === 'user-confirmed-selection' &&
+  platforms.has(source.platform) && exactId(source.chatName) && ['user-confirmed-selection', 'ui-selected-text-unverified-origin'].includes(source.provenance) &&
   /^[a-f0-9]{64}$/.test(source.textDigest ?? '') && Number.isSafeInteger(source.capturedAt) && source.capturedAt >= 0;
 const isForward = source => !['compose', 'selection'].includes(source?.kind) && validChat(source) && exactId(source.messageId);
 const validSource = source => isCompose(source) || isSelection(source) || isForward(source);

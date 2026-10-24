@@ -112,3 +112,23 @@ flushes protect against normal process crashes; portable Node APIs cannot
 guarantee Windows directory-entry persistence under sudden power loss. This is
 not an exactly-once network guarantee. Reconciliation and retention management
 remain necessary before an actual send adapter can ship.
+
+## Main-owned native selection transport
+
+`desktop/native-selection-client.mjs` supplies one-shot read-only transport.
+Its fixed executable path and window witness resolver are constructor-only main
+inputs; shell IPC accepts only platform and human-declared chat label. Responses
+must match request ID, nonce, PID/start time/HWND/executable witness, size limits
+and selected-text provenance. Timeout terminates only the helper spawned for
+that request. Text and arbitrary diagnostics are never logged.
+`captureObservedSelection` creates a private capture marked
+`ui-selected-text-unverified-origin`, without a platform message ID or verified
+chat label. Main currently registers **no window bindings**, so the request is
+unsupported and never launches a helper against a user's account by default.
+
+Positive/negative transport tests use owned test doubles. The new transport's
+actual owned WPF fixture run returned a safe observation refusal; it did not
+establish end-to-end selected-text acquisition through this client. The earlier
+direct focused sidecar success remains a narrower result. Production window
+binding, binary distribution and provider validation remain prerequisites for a
+working native capture control.

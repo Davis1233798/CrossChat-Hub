@@ -97,10 +97,10 @@ internal static class ReadOnlyRouting {
           if (request == null || !(request["id"] is string)) throw new Exception();
           id = Limited((string)request["id"], 64);
           object result = Observe(request);
-          Console.WriteLine(Json.Serialize(new { v = 1, id, ok = true, result }));
+          Console.WriteLine(Json.Serialize(new { v = 1, id, nonce, ok = true, result }));
         } catch (Exception error) {
-          string[] safe = { "selection-unsupported", "focus-outside-target", "single-selection-required", "empty-selection", "header-not-unique" };
-          Console.WriteLine(Json.Serialize(new { v = 1, id, ok = false, error = Array.IndexOf(safe, error.Message) >= 0 ? error.Message : "request-or-target-unavailable" }));
+          string[] safe = { "selection-unsupported", "focus-outside-target", "single-selection-required", "empty-selection", "header-not-unique", "invalid-schema", "invalid-request", "session-mismatch", "window-mismatch", "window-unavailable", "value-limit" };
+          Console.WriteLine(Json.Serialize(new { v = 1, id, nonce, ok = false, error = Array.IndexOf(safe, error.Message) >= 0 ? error.Message : "request-or-target-unavailable" }));
         }
       }
     } catch { Console.Error.WriteLine("Read-only target unavailable"); return 2; }
