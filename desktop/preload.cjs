@@ -16,4 +16,7 @@ contextBridge.exposeInMainWorld('crosschatDesktop', Object.freeze({
   captureObservedSelection: input => ipcRenderer.invoke('crosschat:selection-observe', input),
   prepareSelection: input => ipcRenderer.invoke('crosschat:selection-prepare', input),
   revokeSelection: input => ipcRenderer.invoke('crosschat:selection-revoke', input),
+  listLineCandidates: () => ipcRenderer.invoke('crosschat:line-bind-list'),
+  bindLineCandidate: input => ipcRenderer.invoke('crosschat:line-bind-confirm', input),
+  unbindLine: () => ipcRenderer.invoke('crosschat:line-bind-clear'),
 }));

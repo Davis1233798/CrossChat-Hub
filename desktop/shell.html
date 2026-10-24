@@ -32,6 +32,13 @@
     <p>LINE 官方在 Windows／macOS 提供桌面應用程式，以及 Google Chrome 專用的 LINE 擴充功能；沒有可安全直接載入的標準網頁聊天網址。Electron 無法保證相容 Chrome 商店擴充功能。</p>
     <p><strong>此分頁目前不能收發 LINE 私人訊息。</strong> 不會要求在非官方表單中輸入 LINE 密碼，也不會假裝 LINE Login 等同個人聊天登入。</p>
     <div class="buttons"><button type="button" data-line-link="desktop">開啟 LINE 官方下載</button><button type="button" data-line-link="chrome" class="secondary">開啟官方 Chrome 擴充功能</button></div>
+    <div id="line-binding" class="line-binding">
+      <h2>選擇已登入的 LINE 主視窗</h2>
+      <p>列出只會檢查官方 LINE 程序與主視窗中繼資料，不會讀取標題、聊天內容或控制項，也不會切換或聚焦視窗。請自行確認登入狀態與視窗用途。</p>
+      <div class="buttons"><button id="line-candidates-refresh" type="button">列出 LINE 視窗</button><button id="line-unbind" type="button" class="secondary" hidden>解除綁定</button></div>
+      <p id="line-binding-status" role="status">尚未綁定。列出視窗不會自動選擇。</p>
+      <ol id="line-candidate-list"></ol>
+    </div>
     <small>其他四個分頁會使用各平台官方網頁介面。能否成功登入仍取決於平台是否允許使用 Electron 內嵌 Chromium。</small>
   </section>
   <section id="connecting" class="native-panel"><div class="spinner"></div><h2>載入官方聊天網站中</h2><p>首次使用請依該平台自己的登入流程完成驗證。</p></section>

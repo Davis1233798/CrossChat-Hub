@@ -10,6 +10,8 @@ const { createResetIntentStore } = require('./reset-intent.cjs');
 const { createWorkspaceState } = require('./workspace-state.cjs');
 const { createForwardingLedger } = require('./forwarding-ledger.cjs');
 const { registerForwardingIpc } = require('./forwarding-ipc.cjs');
+const { createLineBinding } = require('./line-binding.cjs');
+const { createLineWitnessClient } = require('./line-witness-client.cjs');
 const { isOfficialOrigin, canCheckPermission, needsUserApproval } = require('./permissions.cjs');
 // Must precede single-instance lock AND every profile-backed store/session.
 const brokerStudy = require('./native-broker-study.cjs').configureBrokerStudy(app);
@@ -304,17 +306,23 @@ if (singleInstance) {
     if (brokerStudy) await brokerStudy.start();
     const { createForwardingDrafts } = await import('./forwarding-drafts.mjs');
     const { createNativeSelectionClient } = await import('./native-selection-client.mjs');
+    const lineWitness = process.platform === 'win32' && !app.isPackaged ? createLineWitnessClient({
+      binaryPath: path.join(__dirname, '..', 'build', 'bin', 'native-host', 'LineWitness.exe'),
+    }) : null;
+    const lineBinding = createLineBinding({
+      listCandidates: () => lineWitness ? lineWitness.listCandidates() : Promise.reject(new Error('LINE binding is available only in the Windows development build')),
+      validateWitness: witness => lineWitness ? lineWitness.validateWitness(witness) : Promise.reject(new Error('LINE binding helper unavailable')),
+    });
     const selectionClient = createNativeSelectionClient({
       binaryPath: path.join(__dirname, '..', 'build', 'bin', 'native-routing', 'ReadOnlyRouting.exe'),
-      // Bind only after explicit main-owned window classification. No live
-      // account window is implicitly discovered or bound at startup.
+      witnessFor: platform => lineBinding.witnessFor(platform),
     });
     const drafts = createForwardingDrafts({
       observeSelection: platform => selectionClient.observe(platform),
       ledger: createForwardingLedger(path.join(app.getPath('userData'), 'forwarding-ledger')),
       // No verified personal-chat UI adapter is registered yet.
     });
-    registerForwardingIpc(ipcMain, () => mainWindow, pathToFileURL(path.join(__dirname, 'shell.html')).href, drafts);
+    registerForwardingIpc(ipcMain, () => mainWindow, pathToFileURL(path.join(__dirname, 'shell.html')).href, drafts, lineBinding);
     ipcMain.handle('crosschat:tab-switch', (event, id) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
       chooseTab(id); return true;

@@ -46,6 +46,46 @@
   document.getElementById('open-browser').addEventListener('click', () => window.crosschatDesktop.openInBrowser(selected));
   document.getElementById('quit').addEventListener('click', () => window.crosschatDesktop.quit());
   document.querySelectorAll('[data-line-link]').forEach(button => button.addEventListener('click', () => window.crosschatDesktop.openLineOfficial(button.dataset.lineLink)));
+  const lineCandidateList = document.getElementById('line-candidate-list');
+  const lineBindingStatus = document.getElementById('line-binding-status');
+  const lineUnbind = document.getElementById('line-unbind');
+  let lineBindingBusy = false;
+  function clearLineCandidates() { lineCandidateList.replaceChildren(); }
+  document.getElementById('line-candidates-refresh').addEventListener('click', async () => {
+    if (lineBindingBusy) return;
+    lineBindingBusy = true; clearLineCandidates(); lineBindingStatus.textContent = '正在檢查 LINE 主視窗中繼資料…';
+    try {
+      const result = await window.crosschatDesktop.listLineCandidates();
+      lineUnbind.hidden = !result.bound;
+      if (result.status !== 'available') { lineBindingStatus.textContent = '目前無法確認 LINE 主視窗（Windows 開發版 helper 或官方簽章驗證不可用）。'; return; }
+      lineBindingStatus.textContent = result.candidates.length ? '請逐一確認視窗；程式不會替你選擇。' : '未找到符合條件的官方 LINE 主視窗。';
+      for (const candidate of result.candidates) {
+        const row = document.createElement('li');
+        const button = document.createElement('button'); button.type = 'button';
+        button.textContent = `確認：第 ${candidate.sequence} 個視窗是我已登入的聊天主視窗，並綁定`;
+        button.addEventListener('click', async () => {
+          if (lineBindingBusy) return;
+          lineBindingBusy = true; button.disabled = true;
+          try {
+            const bound = await window.crosschatDesktop.bindLineCandidate({ candidateId: candidate.candidateId, confirmed: true });
+            clearLineCandidates();
+            if (bound.status === 'bound') { lineBindingStatus.textContent = '已綁定你確認的 LINE 主視窗。每次觀察前都會重新驗證。'; lineUnbind.hidden = false; }
+            else { lineBindingStatus.textContent = '候選視窗已失效，請重新列出並確認。'; lineUnbind.hidden = true; }
+          } catch { lineBindingStatus.textContent = '無法綁定此視窗，請重新列出並確認。'; }
+          finally { lineBindingBusy = false; }
+        });
+        row.append(button); lineCandidateList.append(row);
+      }
+    } catch { lineBindingStatus.textContent = '無法列出 LINE 主視窗。'; }
+    finally { lineBindingBusy = false; }
+  });
+  lineUnbind.addEventListener('click', async () => {
+    if (lineBindingBusy) return;
+    lineBindingBusy = true;
+    try { await window.crosschatDesktop.unbindLine(); lineUnbind.hidden = true; clearLineCandidates(); lineBindingStatus.textContent = '已解除 LINE 主視窗綁定。'; }
+    catch { lineBindingStatus.textContent = '無法解除綁定。'; }
+    finally { lineBindingBusy = false; }
+  });
   window.crosschatDesktop.onTabStatus(({ id, state, detail }) => {
     if (state === 'selected') { select(id, false); return; }
     const tab = tabs.find(t => t.dataset.tab === id);
