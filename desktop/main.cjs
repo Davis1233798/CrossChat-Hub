@@ -187,7 +187,8 @@ function tabView(service) {
     report('title', count ? String(Math.min(Number(count), 999)) : '');
   });
   views.set(service.id, view);
-  let initialUrl = service.url;
+  const isolatedSmoke = process.env.CROSSCHAT_PRODUCT_SMOKE === '1' && path.basename(process.argv[1] ?? '') === 'desktop-smoke.cjs';
+  let initialUrl = isolatedSmoke ? 'data:text/html,<title>CrossChat isolated smoke fixture</title><main>Offline smoke fixture</main>' : service.url;
   if (service.id === 'slack') {
     try { initialUrl = workspaceState.read() || initialUrl; }
     catch { report('workspace-save-error'); }
@@ -339,6 +340,7 @@ if (singleInstance) {
       ? globalThis[Symbol.for('crosschat.productSmokeHooks')] : null;
     const { createSlackPkce } = await import('./slack-pkce.mjs');
     const { createSlackUserApi } = await import('./slack-user-api.mjs');
+    const { createSlackPersonalAdapter } = await import('./slack-personal-adapter.mjs');
     const pkce = smokeHooks?.slackAccount ? smokeHooks.slackAccount.pkce : createSlackPkce({
       clientId: slackAppConfig.clientId,
       registeredLoopbackRedirectUri: slackAppConfig.registeredLoopbackRedirectUri,
@@ -367,6 +369,14 @@ if (singleInstance) {
       witnessFor: platform => lineBinding.witnessFor(platform),
     });
     const drafts = createForwardingDrafts({
+      validateDestination: selectionId => smokeHooks?.slackDestination?.resolveSelection(selectionId) ?? slackDestinationSnapshots.resolveSelection(selectionId),
+      adapterFor: (platform, destination, sourceValid) => {
+        if (platform !== 'slack' || !destination) return null;
+        const status = slackAccount.getStatus();
+        return createSlackPersonalAdapter({ accountService: slackAccount, userApi: slackUserApi,
+          destinations: smokeHooks?.slackDestination ?? slackDestinationSnapshots, selectionId: destination.selectionId,
+          selectedAccount: status.state === 'connected' ? status.account : null, sourceValid });
+      },
       observeSelection: platform => smokeHooks ? smokeHooks.observeSelection(platform) : process.platform === 'win32' ? selectionClient.observe(platform) : Promise.resolve({ status: 'unsupported', reason: 'selection-helper-unavailable' }),
       ledger: createForwardingLedger(path.join(app.getPath('userData'), 'forwarding-ledger')),
       // No verified personal-chat UI adapter is registered yet.

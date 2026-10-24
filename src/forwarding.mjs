@@ -115,6 +115,12 @@ export async function executeForward(prepared, adapter, ledger) {
       (plan.mention && !adapter.capabilities.nativeMention) ||
       (plan.attachments.length && !adapter.capabilities.attachments)) return { status: 'unsupported', reason: 'adapter-capabilities-changed' };
   if (typeof ledger?.claim !== 'function' || typeof ledger?.settle !== 'function') return invalid('durable-delivery-ledger-required');
+  if (typeof adapter.preflight === 'function') {
+    let checked;
+    try { checked = await adapter.preflight(structuredClone(plan)); } catch { checked = { status: 'rejected' }; }
+    if (checked?.status !== 'ready') return { status: 'rejected', reason: checked?.reason ?? 'preflight-failed' };
+  }
+  if (typeof adapter.validatePlan === 'function' && !adapter.validatePlan(structuredClone(plan))) return { status: 'rejected', reason: 'destination-or-account-changed' };
   // Throwing here prevents sending when the durable store is unavailable.
   if (!await ledger.claim(plan.dedupeKey)) return { status: 'duplicate' };
   let receipt;

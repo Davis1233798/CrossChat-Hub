@@ -114,7 +114,7 @@ export function createSlackUserApi({
     }) });
   }
 
-  async function postPlainText({ accessToken, account, channelId, text } = {}) {
+  async function postPlainText({ accessToken, account, channelId, text, validateBeforeDispatch } = {}) {
     // The caller must durably claim the draft's dedupe key before dispatch.
     // An unknown result is for reconciliation and must never be retried blindly.
     if (!configured) return safeResult('unavailable', 'slack-api-unavailable');
@@ -129,6 +129,7 @@ export function createSlackUserApi({
     const verified = await verifyAccount(accessToken);
     if (verified.status !== 'verified') return safeResult('rejected', 'account-verification-failed');
     if (!sameAccount(account, verified.account)) return safeResult('rejected', 'slack-account-changed');
+    if (validateBeforeDispatch !== undefined && (typeof validateBeforeDispatch !== 'function' || validateBeforeDispatch() !== true)) return safeResult('rejected', 'dispatch-preconditions-changed');
 
     // Intentionally omit client_msg_id: the public chat.postMessage argument
     // reference does not document it as a supported idempotency mechanism.

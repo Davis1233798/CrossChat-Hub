@@ -8,11 +8,14 @@ const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'crosschat-smoke-'));
 process.env.CROSSCHAT_PRODUCT_SMOKE = '1';
 let simulatedHotkey = null, triggerDuringRegistration = false, observedText = '隔離產品 smoke 選取文字', observationStatus = 'observed';
 let registeredAccelerator = null, unregisterCount = 0, observationCount = 0, registerCount = 0;
+let mockedSlackPosts = 0;
+const mockSlackDestination = { status: 'identified', selectionId: 'opaque-smoke-destination', teamId: 'T-SMOKE', conversationId: 'CSMOKE', revision: 1, partition: 'smoke', webContentsId: 99 };
 globalThis[Symbol.for('crosschat.productSmokeHooks')] = {
+  slackDestination: { resolveSelection(id) { return id === mockSlackDestination.selectionId ? { ...mockSlackDestination } : { status: 'stale' }; } },
   slackAccount: {
     clientId: '12345.67890', registeredLoopbackRedirectUri: 'http://localhost:45454/slack/oauth/callback',
     pkce: { isConfigured: true, async begin() { const q = new URLSearchParams({ client_id: '12345.67890', redirect_uri: 'http://localhost:45454/slack/oauth/callback', state: 'A'.repeat(43), scope: '', user_scope: 'chat:write', code_challenge: 'A'.repeat(43), code_challenge_method: 'S256' }); return { status: 'ready', authorizeUrl: `https://slack.com/oauth/v2/authorize?${q}`, completion: Promise.resolve({ status: 'authorized', token: { accessToken: 'isolated-fake-token', expiresIn: 3600 } }), cancel() {} }; } },
-    userApi: { async verifyAccount(token) { if (token !== 'isolated-fake-token') throw new Error('unexpected smoke token'); return { status: 'verified', account: { platform: 'slack', accountKind: 'personal', accountId: 'slack:T-SMOKE:U-SMOKE', teamId: 'T-SMOKE', userId: 'U-SMOKE' } }; } },
+    userApi: { isConfigured: true, async verifyAccount(token) { if (token !== 'isolated-fake-token') throw new Error('unexpected smoke token'); return { status: 'verified', account: { platform: 'slack', accountKind: 'personal', accountId: 'slack:T-SMOKE:U-SMOKE', teamId: 'T-SMOKE', userId: 'U-SMOKE' } }; }, async postPlainText(input) { if (input.accessToken !== 'isolated-fake-token' || input.channelId !== 'CSMOKE' || input.account.teamId !== 'T-SMOKE') throw new Error('unexpected mock Slack request'); mockedSlackPosts++; return { status: 'submitted', receipt: { messageId: '1771862400.000123', target: { platform: 'slack', accountId: input.account.accountId, chatId: input.channelId } } }; } },
     safeStorage: { async isAsyncEncryptionAvailable() { return true; }, async encryptStringAsync(value) { return Buffer.from(Buffer.from(value, 'utf8').toString('base64'), 'ascii'); }, async decryptStringAsync(value) { return { result: Buffer.from(value.toString('ascii'), 'base64').toString('utf8'), shouldReEncrypt: false }; } },
     async openExternal(url) { if (!url.startsWith('https://slack.com/oauth/v2/authorize?')) throw new Error('unexpected smoke URL'); },
   },
@@ -58,6 +61,12 @@ app.whenReady().then(async () => {
     return {initial:result.state,status:status.state,accountId:status.account?.accountId,hasToken:Object.hasOwn(status,'accessToken')};
   })()`);
   if (fakeSlack.initial !== 'connecting' || fakeSlack.status !== 'connected' || fakeSlack.accountId !== 'slack:T-SMOKE:U-SMOKE' || fakeSlack.hasToken) throw new Error('Isolated fake Slack account IPC failed');
+  const mockSend = await window.webContents.executeJavaScript(`(async () => {
+    const preview = await window.crosschatDesktop.prepareDraft({text:'@slack:CSMOKE isolated smoke',slackDestinationSelectionId:'opaque-smoke-destination'});
+    const sent = await window.crosschatDesktop.executeDraft(preview.draftId,preview.revision);
+    return {preview:preview.status,reason:preview.reason,sent:sent.status,sentReason:sent.reason,summary:sent.summary,hasReceipt:Object.hasOwn(sent,'receipt')};
+  })()`);
+  if (mockSend.preview !== 'prepared' || mockSend.sent !== 'submitted' || !mockSend.summary?.includes('API 回執') || mockSend.hasReceipt || mockedSlackPosts !== 1) throw new Error(`Mock Slack forwarding receipt flow failed: ${JSON.stringify({ ...mockSend, mockedSlackPosts })}`);
   const selection = await window.webContents.executeJavaScript(`(async () => {
     const api=window.crosschatDesktop;
     const capture=await api.captureSelection({text:'隔離測試單則文字',platform:'line',chatName:'合成來源'});

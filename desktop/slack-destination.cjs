@@ -87,6 +87,16 @@ function createSlackDestinationSnapshots({ getSlackView, getActiveSlackView, isB
       }
       return { ...publicLocation(selected), selectionId };
     },
+    resolveSelection(selectionId) {
+      expire();
+      const selected = selections.get(selectionId);
+      if (!selected || selected.revision !== completed?.revision || !currentMatches(selected, getSlackView?.())) {
+        if (selected) selections.delete(selectionId);
+        return { status: 'stale' };
+      }
+      return { status: 'identified', selectionId, teamId: selected.teamId, conversationId: selected.conversationId,
+        revision: selected.revision, partition: selected.partition, webContentsId: selected.webContentsId };
+    },
     invalidate() { clear(); },
     get revision() { return revision; },
   };

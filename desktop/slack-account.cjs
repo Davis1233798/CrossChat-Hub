@@ -227,7 +227,24 @@ function createSlackAccountService({ pkce, userApi, safeStorage, filePath, clien
       configured: Boolean(pkce?.isConfigured), canCancel: Boolean(pending) });
   }
 
-  return Object.freeze({ reload, connect, cancel, disconnect, close, getStatus });
+  // Main-process scoped token access. The token is never returned or persisted
+  // by the forwarding layer; every callback is bound to the current generation.
+  async function withVerifiedAccount(expected, operation) {
+    const current = generation;
+    if (closed || state !== 'connected' || !token?.accessToken || !account ||
+        !expected || expected.accountId !== account.accountId || expected.teamId !== account.teamId || expected.userId !== account.userId ||
+        typeof operation !== 'function') return safeStatus('rejected', 'slack-account-changed');
+    const snapshot = account;
+    const verified = await userApi.verifyAccount(token.accessToken);
+    if (closed || current !== generation || state !== 'connected' || token?.accessToken === undefined || account?.accountId !== snapshot.accountId) return safeStatus('rejected', 'slack-account-changed');
+    if (verified.status !== 'verified' || verified.account.accountId !== snapshot.accountId || verified.account.teamId !== snapshot.teamId || verified.account.userId !== snapshot.userId) return safeStatus('rejected', 'slack-account-changed');
+    const result = await operation({ account: snapshot, accessToken: token.accessToken, generation: current });
+    if (current !== generation || closed || state !== 'connected' || account?.accountId !== snapshot.accountId) return result?.status === 'submitted' ? result : safeStatus('unknown', 'reconcile-before-retry');
+    return result;
+  }
+  function getGeneration() { return generation; }
+
+  return Object.freeze({ reload, connect, cancel, disconnect, close, getStatus, withVerifiedAccount, getGeneration });
 }
 
 function isFixedAuthorizeUrl(value, { clientId, registeredLoopbackRedirectUri } = {}) {

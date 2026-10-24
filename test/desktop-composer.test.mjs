@@ -61,7 +61,7 @@ test('shell composer uses text-only previews and reserves space below external v
   const main = readFileSync(new URL('../desktop/main.cjs', import.meta.url), 'utf8');
   assert.match(html, /id="compose-send" disabled/);
   assert.match(html, /textarea id="compose-text"/);
-  assert.match(js, /prepareDraft\(input\)/); assert.doesNotMatch(js, /executeDraft\(|innerHTML/);
+  assert.match(js, /prepareDraft\(input\)/); assert.match(js, /executeDraft\(/); assert.doesNotMatch(js, /innerHTML/);
   assert.match(html, /id="selection-arm"/); assert.match(js, /armSelectionCapture/); assert.match(js, /onObservedSelection/);
   assert.match(html, /id="slack-destination-select"/); assert.match(js, /selectCurrentSlackDestination/);
   assert.match(js, /未發送/);

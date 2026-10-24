@@ -5,14 +5,14 @@ import { createForwardingDrafts } from '../desktop/forwarding-drafts.mjs';
 test('revoking a source while recipient revalidation awaits prevents stale dispatch', async () => {
   let release, delayed = false, calls = 0;
   const gate = new Promise(resolve => release = resolve);
-  const adapter = { platform: 'slack', accountKind: 'personal', capabilities: { sendText: true },
-    resolveChat: async () => { if (delayed) await gate; return [{ platform: 'slack', accountId: 'owned-a', chatId: 'owned-c' }]; },
+  const adapter = { platform: 'line', accountKind: 'personal', capabilities: { sendText: true },
+    resolveChat: async () => { if (delayed) await gate; return [{ platform: 'line', accountId: 'owned-a', chatId: 'owned-c' }]; },
     execute: async () => { calls++; throw new Error('Must not dispatch'); } };
   const service = createForwardingDrafts({ adapterFor: () => adapter,
     ledger: { claim() { throw new Error('Must not claim revoked source'); }, settle() {} } });
   const capture = service.captureSelection({ text: 'Owned original', platform: 'line', chatName: 'Owned source' });
   const ref = { selectionId: capture.selectionId, captureRevision: capture.captureRevision };
-  const draft = await service.prepareSelection({ ...ref, routeText: '@slack:OwnedDestination' });
+  const draft = await service.prepareSelection({ ...ref, routeText: '@line:OwnedDestination' });
   assert.equal(draft.status, 'prepared'); delayed = true;
   const pending = service.execute(draft.draftId, draft.revision);
   assert.equal(service.revokeSelection(ref).status, 'revoked'); release();
@@ -24,7 +24,7 @@ test('manual selection preserves declared provenance and rejects forged referenc
   const capture = service.captureSelection({ text: '原文\n第二行', platform: 'line', chatName: '測試群' });
   assert.equal(capture.status, 'captured'); assert.equal(capture.provenance, 'user-confirmed-selection');
   assert.match(capture.textDigest, /^[a-f0-9]{64}$/); assert.equal(capture.messageId, undefined);
-  const input = { selectionId: capture.selectionId, captureRevision: 1, routeText: '@slack:測試頻道' };
+  const input = { selectionId: capture.selectionId, captureRevision: 1, routeText: '@line:測試頻道' };
   const result = await service.prepareSelection(input);
   assert.equal(result.status, 'unsupported'); assert.equal(result.preview.text, '原文\n第二行');
   assert.equal(result.source.provenance, 'user-confirmed-selection');

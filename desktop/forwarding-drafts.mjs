@@ -2,7 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { parseChatRoute, prepareForward, executeForward } from '../src/forwarding.mjs';
 
 // Main-process-only service. Renderer values are commands, never resolved plans.
-export function createForwardingDrafts({ adapterFor = () => null, observeSelection = async () => ({ status: 'unsupported', reason: 'selection-window-not-bound' }), ledger, now = Date.now, ttlMs = 300000, maxDrafts = 100 } = {}) {
+export function createForwardingDrafts({ adapterFor = () => null, observeSelection = async () => ({ status: 'unsupported', reason: 'selection-window-not-bound' }), ledger, now = Date.now, ttlMs = 300000, maxDrafts = 100, validateDestination = () => null } = {}) {
   const drafts = new Map();
   const selections = new Map();
   const rejected = reason => ({ status: 'rejected', reason });
@@ -23,8 +23,9 @@ export function createForwardingDrafts({ adapterFor = () => null, observeSelecti
     for (const [id, selection] of selections) if (selection.expiresAt <= now()) selections.delete(id);
   }
     async function prepare(input, selection = null) {
-      if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(k => !['text', 'draftId', 'revision'].includes(k)) ||
-          typeof input.text !== 'string' || input.text.length > 16000) return rejected('invalid-draft-input');
+      if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(k => !['text', 'draftId', 'revision', 'slackDestinationSelectionId'].includes(k)) ||
+          typeof input.text !== 'string' || input.text.length > 16000 ||
+          (input.slackDestinationSelectionId !== undefined && (typeof input.slackDestinationSelectionId !== 'string' || input.slackDestinationSelectionId.length > 128))) return rejected('invalid-draft-input');
       expire();
       let draft;
       if (input.draftId !== undefined || input.revision !== undefined) {
@@ -40,16 +41,25 @@ export function createForwardingDrafts({ adapterFor = () => null, observeSelecti
       draft.expiresAt = now() + ttlMs;
       draft.plan = null;
       draft.route = parseChatRoute(input.text);
+      draft.destinationSelectionId = draft.route.platform === 'slack' ? input.slackDestinationSelectionId : null;
       draft.source = selection?.source ?? { kind: 'compose', draftId: draft.id };
       if (selection && draft.route.status === 'parsed') draft.route.text = selection.text;
       draft.result = { status: 'preparing' };
       if (draft.route.status !== 'parsed') { draft.result = draft.route; return summary(draft); }
       let result, adapter;
       try {
-        adapter = await adapterFor(draft.route.platform);
+        const destination = draft.route.platform === 'slack' && typeof input.slackDestinationSelectionId === 'string'
+          ? validateDestination(input.slackDestinationSelectionId) : null;
+        draft.sourceValid = () => draft.source?.kind !== 'selection' || selections.has(draft.source.selectionId);
+        adapter = await adapterFor(draft.route.platform, destination, draft.sourceValid);
+        if (draft.route.platform === 'slack' && (!destination || destination.status !== 'identified' || draft.route.chatName !== destination.conversationId)) {
+          result = { status: 'unsupported', reason: 'select-exact-slack-destination' };
+        } else {
         result = await prepareForward({ route: draft.route, source: draft.source }, adapter);
+        }
       } catch { result = { status: 'unsupported', reason: 'adapter-unavailable' }; }
       if (lookup(draft.id, revision) !== draft) return rejected('draft-superseded');
+      if (draft.route.platform === 'slack' && result.status === 'prepared' && (!validateDestination(input.slackDestinationSelectionId) || !adapter?.validatePlan?.(result.plan))) return rejected('slack-destination-changed');
       draft.result = result;
       draft.plan = result.status === 'prepared' ? result : null;
       draft.adapter = adapter;
@@ -82,14 +92,14 @@ export function createForwardingDrafts({ adapterFor = () => null, observeSelecti
       return { status: 'captured', ...source };
     },
     async prepareSelection(input) {
-      if (!input || typeof input !== 'object' || Object.keys(input).some(k => !['selectionId', 'captureRevision', 'routeText'].includes(k))) return rejected('invalid-selection-reference');
+      if (!input || typeof input !== 'object' || Object.keys(input).some(k => !['selectionId', 'captureRevision', 'routeText', 'slackDestinationSelectionId'].includes(k))) return rejected('invalid-selection-reference');
       expire(); const selected = selections.get(input.selectionId);
       if (!selected || input.captureRevision !== selected.source.captureRevision) return rejected('selection-unavailable');
       const route = parseChatRoute(input.routeText);
       if (route.status !== 'parsed' || route.text) return rejected('selection-route-must-exclude-body');
       // Each call is a new explicit destination preview. Dedupe still covers
       // selection+exact target, allowing a different explicitly chosen target.
-      return prepare({ text: input.routeText }, selected);
+      return prepare({ text: input.routeText, ...(input.slackDestinationSelectionId ? { slackDestinationSelectionId: input.slackDestinationSelectionId } : {}) }, selected);
     },
     revokeSelection(input) {
       if (!input || Object.keys(input).some(k => !['selectionId', 'captureRevision'].includes(k))) return rejected('invalid-selection-reference');
@@ -109,9 +119,12 @@ export function createForwardingDrafts({ adapterFor = () => null, observeSelecti
       if (!draft.plan) return { status: 'unsupported', reason: 'draft-not-prepared' };
       draft.executing = true;
       try {
-        const adapter = await adapterFor(draft.route.platform);
+        const destination = draft.route.platform === 'slack' ? draft.destinationSelectionId ? validateDestination(draft.destinationSelectionId) : null : null;
+        if (draft.route.platform === 'slack' && (!destination || destination.status !== 'identified' || draft.route.chatName !== destination.conversationId)) return rejected('slack-destination-changed');
+        const adapter = draft.adapter;
         const fresh = await prepareForward({ route: draft.route, source: draft.source }, adapter);
         if (lookup(id, revision) !== draft) return rejected('draft-unavailable');
+        if (draft.route.platform === 'slack' && (!validateDestination(draft.destinationSelectionId) || !adapter?.validatePlan?.(fresh.plan))) return rejected('slack-destination-changed');
         const identity = result => JSON.stringify([result.plan?.target, result.plan?.mention]);
         if (adapter !== draft.adapter || fresh.status !== 'prepared' || identity(fresh) !== identity(draft.plan)) {
           draft.plan = null;
@@ -122,7 +135,7 @@ export function createForwardingDrafts({ adapterFor = () => null, observeSelecti
         draft.dispatched = true;
         const result = await executeForward(draft.plan, adapter, ledger);
         // Do not leak adapter receipt/target IDs into the shell.
-        return { status: result.status, ...(result.reason ? { reason: result.reason } : {}) };
+        return { status: result.status, ...(result.reason ? { reason: result.reason } : {}), ...(result.status === 'submitted' ? { summary: 'Slack 已受理純文字訊息；這是 API 回執，不代表對方已送達或讀取。' } : {}) };
       } catch {
         draft.terminal = true;
         return { status: 'unknown', reason: 'reconcile-before-retry' };
