@@ -88,3 +88,26 @@ test('fsync failure never grants a successful claim or executes a send', async t
   assert.equal(createForwardingLedger(dir).claim(prepared.plan.dedupeKey), false);
   assert.equal(createForwardingLedger(dir).get(prepared.plan.dedupeKey).status, 'unknown');
 });
+
+test('outcome flush failure never publishes submitted, and retry cannot overwrite an outcome', t => {
+  const dir = fixture(t), ledger = createForwardingLedger(dir);
+  ledger.claim(key);
+  const mock = t.mock.method(fs, 'fsyncSync', () => { throw new Error('Injected outcome flush failure'); });
+  assert.throws(() => ledger.settle(key, { status: 'submitted', receipt }), /outcome flush failure/);
+  mock.mock.restore();
+  assert.equal(ledger.get(key).status, 'unknown');
+  const restarted = createForwardingLedger(dir);
+  assert.equal(restarted.get(key).status, 'unknown');
+  assert.equal(restarted.claim(key), false);
+  assert.deepEqual(readdirSync(dir), [`${key}.claim`]);
+  // A failed settlement relinquishes ownership and cannot be blindly retried.
+  assert.throws(() => ledger.settle(key, { status: 'submitted', receipt }), /not owned/);
+  // Existing outcomes must never be replaced by a new settlement either.
+  const second = 'c'.repeat(64);
+  ledger.claim(second);
+  const existing = { version: 1, status: 'unknown', settledAt: 1 };
+  writeFileSync(join(dir, `${second}.outcome`), JSON.stringify(existing));
+  assert.throws(() => ledger.settle(second, { status: 'submitted', receipt }), { code: 'EEXIST' });
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, `${second}.outcome`), 'utf8')), existing);
+  assert.equal(ledger.get(second).status, 'unknown');
+});

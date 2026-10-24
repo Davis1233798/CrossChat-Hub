@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 
 // Exclusive creation is the cross-process arbiter. Never remove reservations:
 // a crash/partial write must block blind retries, not make another send possible.
@@ -18,6 +19,19 @@ function createForwardingLedger(directory) {
   function read(file) {
     try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
     catch (error) { if (error.code === 'ENOENT') return null; if (error instanceof SyntaxError) return { status: 'unknown' }; throw error; }
+  }
+  function publishOutcome(file, value) {
+    // Do not expose a success-shaped JSON file before its flush succeeds.
+    // Hard-link publication is atomic and exclusive, unlike rename on hosts
+    // where an existing outcome could be replaced. A failed flush leaves only
+    // the claim (and possibly an ignored temporary file), so recovery is unknown.
+    const temporary = `${file}.${randomUUID()}.tmp`;
+    try {
+      writeExclusive(temporary, value);
+      fs.linkSync(temporary, file);
+    } finally {
+      try { fs.unlinkSync(temporary); } catch { /* Claim remains the retry barrier. */ }
+    }
   }
   return {
     claim(key) {
@@ -46,8 +60,12 @@ function createForwardingLedger(directory) {
       }
       // Deliberate allowlist: no message body, attachment paths, arbitrary
       // adapter payloads, tokens or credentials are persisted.
-      writeExclusive(file, { version: 1, status: outcome.status, settledAt: Date.now(), ...(receipt ? { receipt } : {}) });
-      owned.delete(key);
+      try {
+        publishOutcome(file, { version: 1, status: outcome.status, settledAt: Date.now(), ...(receipt ? { receipt } : {}) });
+      } finally {
+        // A persistence error after sending is uncertain even in this process.
+        owned.delete(key);
+      }
     },
     get(key) {
       const claim = read(keyPath(key, 'claim'));
