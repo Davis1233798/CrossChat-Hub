@@ -133,3 +133,78 @@ Electron product has **not** been refactored to this architecture; launch/IPC,
 controller monitoring outside this intentional-crash study, manual detach,
 controller restart and broker-failure policy remain design work. Existing-app
 crash or attachment retries remain out of scope until these risks are addressed.
+
+## Actual Electron Hub in the broker (Windows developer study)
+
+`desktop/native-broker-study.cjs` now connects the real `desktop/main.cjs` and
+its existing shell/composer to the fixed, locally compiled `HubBroker.exe`.
+This is opt-in with `CROSSCHAT_BROKER_STUDY=1`, unpackaged Windows only. Build
+with `./experiments/native-host/build.ps1`, set that environment variable in a
+developer terminal, then run `npm run desktop`. Clear it afterwards to use the
+normal app. `CROSSCHAT_BROKER_TEST_MODE` defaults to `manual`; `normal` requests
+the normal flush/quit after attachment and a resize check, while `crash` exits
+the isolated Electron controller abruptly with code 73, bypassing its normal
+shutdown path. These modes do not attach any existing application.
+
+The flag is processed before the single-instance lock and all profile-backed
+stores. A fresh temporary `crosschat-broker-hub-*` profile and session directory
+are created for every run. All web service views load only a random-path page
+on this run's bound `127.0.0.1` HTTP server; navigation/redirects/popups are
+blocked, and external links/profile clearing are disabled in this study.
+The original LINE limitation panel remains accurate. No real messenger
+session, login dialog, user LINE/Chrome process or message is inspected.
+
+The broker owns the top-level native root and a content panel. The actual Hub
+HWND is a left child and a broker-launched synthetic chat HWND is its right
+sibling, with the Hub's entire composer visible. This is a stage toward the
+desired LINE content-tab integration, not that final layout or LINE support.
+The sidecar is a fixed development path, not a renderer-supplied executable.
+Private inherited stdio carries versioned JSON lines with a random nonce and
+4096-character line limit. Main obtains its HWND from `getNativeWindowHandle`;
+broker checks HWND ownership, controller PID and process start ticks before
+parenting. It accepts only attach/shutdown/resize-check commands. There is no
+socket, download, arbitrary app path or third-party attach mode.
+
+The broker manifest uses PerMonitor awareness to match the observed Electron
+45 HWND (context -3). The first PerMonitorV2 attempt was correctly refused
+before parenting (broker -4 versus Electron -3); strict context equality stays
+required. Layout uses broker native physical coordinates and Electron's own
+resize handling keeps its web views in DIP. A resize check reads back child
+outer rectangles and verifies adjacency, height and the shared root. Focus
+buttons request Hub focus or fixture focus, but keyboard/IME behavior and
+mixed-monitor DPI transitions remain unverified.
+
+Normal root closure requests the existing Hub flush/quit, leaves the root
+alive while waiting, then restores the synthetic fixture after the controller
+exits. The broker also polls the retained controller Process handle every
+100 ms to cover abrupt exit, restores fixture parent/style/placement/visibility,
+then closes the owned fixture normally. Broker is a detached WinExe process:
+the initial shared-console prototype died with controller console teardown
+and left an orphaned synthetic process; it was cleaned up by verified owned
+PID/start time. This failure is not counted as recovery success.
+
+Observed Windows x64 on 2026-10-24 after those corrections:
+
+- Build of `HubBroker.exe` and JavaScript syntax checks passed.
+- Normal isolated run and abrupt-exit isolated run both reported all checks
+  true: attachment/shared root, equal DPI, resize, controller exit, surviving
+  broker root and original fixture HWND, exact fixture restoration and normal
+  fixture closure. Errors were null; no `HubBroker` processes remained.
+- A separate manual run survived an OS termination of only its recorded owned
+  Electron controller PID/start time; fixture restoration/normal close passed.
+- Computer Use selected and activated the uniquely returned broker root. Its
+  screenshot visibly showed the actual Hub, tabs, loopback page and full
+  composer on the left, and the owned native fixture on the right. No screenshot
+  is saved to the repository. Root Alt-F4 requested Hub quit and restoration;
+  the study shell was then closed normally. No real chat UI was operated.
+- With the flag absent, `electron scripts/desktop-smoke.cjs` passed the existing
+  visible-window/tab/composer/LINE-limitation/normal-close checks in its own
+  temporary smoke profile.
+
+The helper is included with source but the compiled .NET Framework sidecar is
+not packaged or released. Packaged/non-Windows flag activation fails closed;
+missing fixed binary fails before window/server startup. This remains a
+developer study: broker hard-crash safety, handshake failure after partial
+parenting, hung controller recovery, complete focus/DPI behavior, signed
+distribution and actual LINE tab integration are not established. Do not use
+this sidecar to attach existing LINE/Chrome windows.

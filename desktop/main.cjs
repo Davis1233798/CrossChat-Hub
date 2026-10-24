@@ -11,6 +11,8 @@ const { createWorkspaceState } = require('./workspace-state.cjs');
 const { createForwardingLedger } = require('./forwarding-ledger.cjs');
 const { registerForwardingIpc } = require('./forwarding-ipc.cjs');
 const { isOfficialOrigin, canCheckPermission, needsUserApproval } = require('./permissions.cjs');
+// Must precede single-instance lock AND every profile-backed store/session.
+const brokerStudy = require('./native-broker-study.cjs').configureBrokerStudy(app);
 
 // Each official site runs in its own hardened, persistent Chromium profile.
 // This is not an API bridge: no password interception, cookie export, or
@@ -113,6 +115,11 @@ function configureSession(service) {
 function tabView(service) {
   const existing = views.get(service.id);
   if (existing && !existing.webContents.isDestroyed()) return existing;
+  if (brokerStudy) {
+    const fixtureView = brokerStudy.createView(WebContentsView);
+    views.set(service.id, fixtureView);
+    return fixtureView;
+  }
   configureSession(service);
   const view = new WebContentsView({
     webPreferences: {
@@ -246,6 +253,7 @@ function attachHotkeys(contents) {
 const quitSafely = createShutdown({
   prepare: () => {
     closing = true;
+    brokerStudy?.beginShutdown();
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
     // Stop every remote writer, including authentication popups, before flushing.
     for (const popup of popupWindows.keys()) if (!popup.isDestroyed()) popup.destroy();
@@ -266,7 +274,8 @@ const quitSafely = createShutdown({
 });
 async function openWindow() {
   mainWindow = new BrowserWindow({
-    title: 'CrossChat Hub', show: false,
+    title: brokerStudy ? 'CrossChat Hub · isolated broker study' : 'CrossChat Hub', show: false,
+    frame: !brokerStudy,
     width: 1320, height: 850, minWidth: 920, minHeight: 620,
     backgroundColor: '#0b1220',
     webPreferences: {
@@ -284,11 +293,15 @@ async function openWindow() {
   mainWindow.on('close', event => { event.preventDefault(); void quitSafely(); });
   mainWindow.on('closed', () => { void quitSafely(); });
   await mainWindow.loadFile(path.join(__dirname, 'shell.html'));
-  if (!closing) mainWindow.show();
+  if (!closing) {
+    if (brokerStudy) await brokerStudy.attach(mainWindow, () => { void quitSafely(); });
+    else mainWindow.show();
+  }
 }
 if (singleInstance) {
   app.on('second-instance', () => { if (mainWindow && !mainWindow.isDestroyed()) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); } });
   app.whenReady().then(async () => {
+    if (brokerStudy) await brokerStudy.start();
     const { createForwardingDrafts } = await import('./forwarding-drafts.mjs');
     const drafts = createForwardingDrafts({
       ledger: createForwardingLedger(path.join(app.getPath('userData'), 'forwarding-ledger')),
@@ -308,16 +321,19 @@ if (singleInstance) {
     });
     ipcMain.handle('crosschat:profile-clear', (event, id) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      if (brokerStudy) return { state: 'unavailable' };
       return profileReset.request(id);
     });
     ipcMain.handle('crosschat:open-browser', (event, id) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      if (brokerStudy) return false;
       const service = getService(id);
       if (!service?.url) return false;
       return shell.openExternal(service.url).then(() => true);
     });
     ipcMain.handle('crosschat:line-official', (event, kind) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      if (brokerStudy) return false;
       const url = kind === 'chrome' ? LINE_DOWNLOADS.chrome : LINE_DOWNLOADS[process.platform === 'darwin' ? 'mac' : 'windows'];
       if (!url) return false;
       return shell.openExternal(url).then(() => true);
