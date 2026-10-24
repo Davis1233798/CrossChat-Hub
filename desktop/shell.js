@@ -37,7 +37,7 @@
     unavailable: 'Slack OAuth 尚未由維護者設定', 'signed-out': '尚未連結 Slack 帳號', connecting: '等待 Slack 官方授權…',
     verifying: '正在驗證授權帳號…', connected: '已驗證 Slack 個人帳號', 'reauthorization-required': '授權已過期或無效，請重新連結',
     'verification-unavailable': '目前無法驗證 Slack 身分', 'secure-storage-unavailable': '此裝置無法安全保存授權',
-    'storage-unavailable': '無法安全讀取授權資料', 'disconnect-incomplete': '解除帳號未完成，請重試', 'connect-failed': 'Slack 登入未完成',
+    'storage-unavailable': '無法安全讀取授權資料', 'disconnect-incomplete': '解除尚未完成，重啟可能重新載入，請重試', 'connect-failed': 'Slack 登入未完成',
   };
   function renderSlackAccount(value) {
     slackState.textContent = value?.state === 'connected' && value.account
@@ -46,7 +46,8 @@
     slackConnect.hidden = value?.state === 'connected' || value?.state === 'connecting';
     slackConnect.disabled = value?.state === 'secure-storage-unavailable' || value?.state === 'storage-unavailable' || value?.state === 'disconnect-incomplete';
     slackCancel.hidden = value?.state !== 'connecting';
-    slackDisconnect.hidden = value?.state !== 'connected';
+    slackDisconnect.hidden = value?.state !== 'connected' && value?.state !== 'disconnect-incomplete';
+    slackDisconnect.textContent = value?.state === 'disconnect-incomplete' ? '重試解除' : '解除 Slack 帳號';
   }
   async function reloadSlackAccount() {
     slackReload.disabled = true;

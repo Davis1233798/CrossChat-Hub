@@ -10,13 +10,14 @@ const ownIdentity = account => account ? Object.freeze({
 }) : null;
 
 /** Main-only personal Slack account lifecycle. No method returns credentials. */
-function createSlackAccountService({ pkce, userApi, safeStorage, filePath, now = Date.now, fsPromises = fs } = {}) {
+function createSlackAccountService({ pkce, userApi, safeStorage, filePath, clientId, registeredLoopbackRedirectUri, now = Date.now, fsPromises = fs } = {}) {
   let generation = 0;
   let token = null;
   let account = null;
   let state = 'unavailable';
   let pending = null;
   let closed = false;
+  let disconnectNeedsRetry = false;
   let storageAvailable = false;
   let storageTail = Promise.resolve();
   const serializeStorage = operation => {
@@ -65,7 +66,7 @@ function createSlackAccountService({ pkce, userApi, safeStorage, filePath, now =
         if (error?.code !== 'EEXIST') {
           // If marker creation fails, atomically move the encrypted blob itself
           // out of the load path before reporting an incomplete cleanup.
-          try { await fsPromises.rename(filePath, marker); }
+          try { await fsPromises.rename(filePath, marker); await fsPromises.unlink(marker); }
           catch (renameError) { if (renameError?.code !== 'ENOENT') throw renameError; }
           return;
         }
@@ -76,6 +77,11 @@ function createSlackAccountService({ pkce, userApi, safeStorage, filePath, now =
   }
 
   async function verifyAndAdopt(candidate, expectedGeneration, persist = true, expectedAccount = null) {
+    if (closed || expectedGeneration !== generation) return safeStatus('disconnected');
+    if (candidate.expiresAt && candidate.expiresAt <= now()) {
+      token = null; account = null; state = 'reauthorization-required';
+      return safeStatus(state, 'expired');
+    }
     const verified = await userApi.verifyAccount(candidate.accessToken);
     if (closed || expectedGeneration !== generation) return safeStatus('disconnected');
     if (verified.status !== 'verified') {
@@ -88,10 +94,6 @@ function createSlackAccountService({ pkce, userApi, safeStorage, filePath, now =
         (expectedAccount && (expectedAccount.userId !== verified.account.userId || expectedAccount.teamId !== verified.account.teamId))) {
       token = null; account = null; state = 'reauthorization-required';
       return safeStatus(state, 'oauth-identity-mismatch');
-    }
-    if (candidate.expiresAt && candidate.expiresAt <= now()) {
-      token = null; account = null; state = 'reauthorization-required';
-      return safeStatus(state, 'expired');
     }
     token = Object.freeze({ accessToken: candidate.accessToken, expiresAt: candidate.expiresAt ?? null });
     account = ownIdentity(verified.account);
@@ -108,38 +110,49 @@ function createSlackAccountService({ pkce, userApi, safeStorage, filePath, now =
 
   async function reload() {
     if (closed) return safeStatus('disconnected');
+    if (disconnectNeedsRetry) return safeStatus('disconnect-incomplete');
     if (pending || state === 'connecting') return safeStatus('connecting');
     const current = ++generation;
     token = null; account = null;
     try {
       storageAvailable = await safeStorage.isAsyncEncryptionAvailable() === true;
     } catch { storageAvailable = false; }
+    if (closed || current !== generation) return safeStatus(state);
     if (!storageAvailable) { state = pkce?.isConfigured ? 'secure-storage-unavailable' : 'unavailable'; return safeStatus(state); }
-    try { await fsPromises.access(`${filePath}.disabled`); state = 'signed-out'; return safeStatus(state); }
-    catch (error) { if (error?.code !== 'ENOENT') { state = 'storage-unavailable'; return safeStatus(state); } }
+    try { await fsPromises.access(`${filePath}.disabled`); if (closed || current !== generation) return safeStatus(state); state = 'signed-out'; return safeStatus(state); }
+    catch (error) { if (closed || current !== generation) return safeStatus(state); if (error?.code !== 'ENOENT') { state = 'storage-unavailable'; return safeStatus(state); } }
+    if (closed || current !== generation) return safeStatus(state);
     let encrypted;
     try { encrypted = await fsPromises.readFile(filePath); }
     catch (error) {
+      if (closed || current !== generation) return safeStatus(state);
       if (error?.code === 'ENOENT') { state = pkce?.isConfigured ? 'signed-out' : 'unavailable'; return safeStatus(state); }
       state = 'storage-unavailable'; return safeStatus(state);
     }
+    if (closed || current !== generation) return safeStatus(state);
     try {
       const decoded = await safeStorage.decryptStringAsync(encrypted);
+      if (closed || current !== generation) return safeStatus(state);
       const text = decoded?.result;
       const stored = JSON.parse(text);
       if (stored?.version !== 1 || typeof stored?.token?.accessToken !== 'string' || !stored.token.accessToken) throw new Error('invalid-account-blob');
       if (stored.token.expiresAt && stored.token.expiresAt <= now()) { state = 'reauthorization-required'; return safeStatus(state, 'expired'); }
-      if (decoded?.shouldReEncrypt) await encryptedWrite({ version: 1, token: stored.token, account: stored.account }, current);
+      if (decoded?.shouldReEncrypt) {
+        await encryptedWrite({ version: 1, token: stored.token, account: stored.account }, current);
+        if (closed || current !== generation) return safeStatus(state);
+      }
       state = 'verifying';
+      if (closed || current !== generation) return safeStatus(state);
       return await verifyAndAdopt(stored.token, current, false, stored.account);
     } catch {
-      if (current === generation) { token = null; account = null; state = 'storage-unavailable'; }
+      if (!closed && current === generation) { token = null; account = null; state = 'storage-unavailable'; }
       return safeStatus(state);
     }
   }
 
   async function connect(openExternal) {
     if (closed) return safeStatus('disconnected');
+    if (disconnectNeedsRetry) return safeStatus('disconnect-incomplete');
     if (!pkce?.isConfigured) { state = 'unavailable'; return safeStatus(state, 'slack-oauth-not-configured'); }
     if (!storageAvailable) {
       try { storageAvailable = await safeStorage.isAsyncEncryptionAvailable() === true; } catch { storageAvailable = false; }
@@ -150,7 +163,7 @@ function createSlackAccountService({ pkce, userApi, safeStorage, filePath, now =
     state = 'connecting';
     const login = await pkce.begin();
     if (current !== generation || closed) { login?.cancel?.(); return safeStatus('disconnected'); }
-    if (login.status !== 'ready' || !isFixedAuthorizeUrl(login.authorizeUrl)) {
+    if (login.status !== 'ready' || !isFixedAuthorizeUrl(login.authorizeUrl, { clientId, registeredLoopbackRedirectUri })) {
       state = login.status === 'unavailable' ? 'unavailable' : 'connect-failed';
       return safeStatus(state, login.reason || 'invalid-authorize-url');
     }
@@ -186,10 +199,12 @@ function createSlackAccountService({ pkce, userApi, safeStorage, filePath, now =
 
   async function disconnect() {
     generation++;
+    disconnectNeedsRetry = true;
     const login = pending; pending = null; token = null; account = null;
     state = 'signed-out';
     try { login?.cancel?.(); } catch {}
-    try { await removeStored(); } catch { state = 'disconnect-incomplete'; }
+    try { await removeStored(); disconnectNeedsRetry = false; }
+    catch { state = 'disconnect-incomplete'; }
     return safeStatus(state);
   }
 
@@ -208,8 +223,21 @@ function createSlackAccountService({ pkce, userApi, safeStorage, filePath, now =
   return Object.freeze({ reload, connect, cancel, disconnect, close, getStatus });
 }
 
-function isFixedAuthorizeUrl(value) {
-  try { const url = new URL(value); return url.protocol === 'https:' && url.hostname === 'slack.com' && url.pathname === '/oauth/v2/authorize' && !url.username && !url.password; }
+function isFixedAuthorizeUrl(value, { clientId, registeredLoopbackRedirectUri } = {}) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.origin !== 'https://slack.com' || url.hostname !== 'slack.com' || url.port ||
+        url.pathname !== '/oauth/v2/authorize' || url.username || url.password || url.hash || !clientId || !registeredLoopbackRedirectUri) return false;
+    const expectedKeys = ['client_id', 'redirect_uri', 'state', 'scope', 'user_scope', 'code_challenge', 'code_challenge_method'];
+    const keys = [...url.searchParams.keys()];
+    if (keys.length !== expectedKeys.length || new Set(keys).size !== keys.length || expectedKeys.some(key => !url.searchParams.has(key))) return false;
+    const state = url.searchParams.get('state');
+    const challenge = url.searchParams.get('code_challenge');
+    const validHash = value => /^[A-Za-z0-9_-]{43}$/.test(value) && Buffer.from(value, 'base64url').length === 32 && Buffer.from(value, 'base64url').toString('base64url') === value;
+    return url.searchParams.get('client_id') === clientId && url.searchParams.get('redirect_uri') === registeredLoopbackRedirectUri &&
+      url.searchParams.get('scope') === '' && url.searchParams.get('user_scope') === 'chat:write' &&
+      url.searchParams.get('code_challenge_method') === 'S256' && validHash(state) && validHash(challenge);
+  }
   catch { return false; }
 }
 

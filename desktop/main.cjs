@@ -347,6 +347,8 @@ if (singleInstance) {
     slackAccount = createSlackAccountService({
       pkce, userApi: slackUserApi,
       safeStorage: smokeHooks?.slackAccount?.safeStorage ?? require('electron').safeStorage,
+      clientId: smokeHooks?.slackAccount?.clientId ?? slackAppConfig.clientId,
+      registeredLoopbackRedirectUri: smokeHooks?.slackAccount?.registeredLoopbackRedirectUri ?? slackAppConfig.registeredLoopbackRedirectUri,
       filePath: path.join(app.getPath('userData'), 'slack-user-account.enc'),
     });
     await slackAccount.reload();

@@ -10,7 +10,8 @@ let simulatedHotkey = null, triggerDuringRegistration = false, observedText = 'é
 let registeredAccelerator = null, unregisterCount = 0, observationCount = 0, registerCount = 0;
 globalThis[Symbol.for('crosschat.productSmokeHooks')] = {
   slackAccount: {
-    pkce: { isConfigured: true, async begin() { return { status: 'ready', authorizeUrl: 'https://slack.com/oauth/v2/authorize?smoke=1', completion: Promise.resolve({ status: 'authorized', token: { accessToken: 'isolated-fake-token', expiresIn: 3600 } }), cancel() {} }; } },
+    clientId: '12345.67890', registeredLoopbackRedirectUri: 'http://localhost:45454/slack/oauth/callback',
+    pkce: { isConfigured: true, async begin() { const q = new URLSearchParams({ client_id: '12345.67890', redirect_uri: 'http://localhost:45454/slack/oauth/callback', state: 'A'.repeat(43), scope: '', user_scope: 'chat:write', code_challenge: 'A'.repeat(43), code_challenge_method: 'S256' }); return { status: 'ready', authorizeUrl: `https://slack.com/oauth/v2/authorize?${q}`, completion: Promise.resolve({ status: 'authorized', token: { accessToken: 'isolated-fake-token', expiresIn: 3600 } }), cancel() {} }; } },
     userApi: { async verifyAccount(token) { if (token !== 'isolated-fake-token') throw new Error('unexpected smoke token'); return { status: 'verified', account: { platform: 'slack', accountKind: 'personal', accountId: 'slack:T-SMOKE:U-SMOKE', teamId: 'T-SMOKE', userId: 'U-SMOKE' } }; } },
     safeStorage: { async isAsyncEncryptionAvailable() { return true; }, async encryptStringAsync(value) { return Buffer.from(Buffer.from(value, 'utf8').toString('base64'), 'ascii'); }, async decryptStringAsync(value) { return { result: Buffer.from(value.toString('ascii'), 'base64').toString('utf8'), shouldReEncrypt: false }; } },
     async openExternal(url) { if (!url.startsWith('https://slack.com/oauth/v2/authorize?')) throw new Error('unexpected smoke URL'); },
