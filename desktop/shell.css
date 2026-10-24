@@ -4,3 +4,8 @@ nav{height:48px;display:flex;align-items:stretch;padding:0 14px;gap:6px}.tab{min
 
 .unread{display:inline-flex;align-items:center;justify-content:center;margin-left:7px;background:#4ec7b9;color:#04242d;min-width:18px;height:18px;padding:0 5px;border-radius:14px;font-size:11px}.tab{white-space:nowrap}#open-browser{font-size:12px;white-space:nowrap}#open-browser[hidden]{display:none}
 nav{overflow-x:auto;scrollbar-width:none}.tab{min-width:100px;flex-shrink:0}#clear-profile{background:transparent;border:0;color:#9db0ca;padding:0 12px;cursor:pointer;white-space:nowrap;font-size:12px}#clear-profile:hover{color:white}#clear-profile:disabled{opacity:.5;cursor:wait}#clear-profile[hidden]{display:none}
+#native-content{height:calc(100vh - 300px);overflow:auto}
+#composer{position:fixed;bottom:0;left:0;right:0;height:184px;padding:12px 18px;background:#111c30;border-top:1px solid #2f405a;display:flex;flex-direction:column;gap:7px}
+#composer label{font-size:13px}#composer small{color:#9db0ca;font-size:11px}#compose-text{width:100%;min-height:54px;flex:1;resize:none;background:#0b1220;color:#e6edf6;border:1px solid #65819f;border-radius:5px;padding:7px;font:inherit;font-size:14px}
+.compose-actions{display:flex;align-items:center;gap:10px;min-height:44px}.compose-actions button{flex-shrink:0;border:1px solid #65819f;background:#1a3045;color:#e6edf6;padding:7px;border-radius:4px;cursor:pointer}.compose-actions button:disabled{opacity:.55;cursor:default}#compose-status{font-size:12px;color:#b6c6d9;overflow-wrap:anywhere;max-height:44px;overflow:auto}#composer :focus-visible{outline:2px solid #62c8c1;outline-offset:2px}
+@media(max-width:1000px){#composer small{display:block}.compose-actions{gap:6px}#compose-status{font-size:11px}}

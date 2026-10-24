@@ -7,12 +7,15 @@ const { protectContents } = require('./navigation.cjs');
 const { createShutdown, flushSessions } = require('./lifecycle.cjs');
 const { createSessionReset } = require('./session-data.cjs');
 const { createResetIntentStore } = require('./reset-intent.cjs');
+const { createForwardingLedger } = require('./forwarding-ledger.cjs');
+const { registerForwardingIpc } = require('./forwarding-ipc.cjs');
 const { isOfficialOrigin, canCheckPermission, needsUserApproval } = require('./permissions.cjs');
 
 // Each official site runs in its own hardened, persistent Chromium profile.
 // This is not an API bridge: no password interception, cookie export, or
 // injection into a remote messenger is performed.
 const HEADER_HEIGHT = 116;
+const COMPOSER_HEIGHT = 184;
 const singleInstance = app.requestSingleInstanceLock();
 let mainWindow = null;
 let currentId = null;
@@ -34,7 +37,7 @@ function isTrustedSender(event) {
 function viewBounds() {
   if (!mainWindow) return { x: 0, y: HEADER_HEIGHT, width: 1000, height: 650 };
   const { width, height } = mainWindow.getContentBounds();
-  return { x: 0, y: HEADER_HEIGHT, width, height: Math.max(1, height - HEADER_HEIGHT) };
+  return { x: 0, y: HEADER_HEIGHT, width, height: Math.max(1, height - HEADER_HEIGHT - COMPOSER_HEIGHT) };
 }
 function announce(id, state, detail = '') {
   if (!closing && mainWindow && !mainWindow.isDestroyed()) {
@@ -256,6 +259,12 @@ async function openWindow() {
 if (singleInstance) {
   app.on('second-instance', () => { if (mainWindow && !mainWindow.isDestroyed()) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); } });
   app.whenReady().then(async () => {
+    const { createForwardingDrafts } = await import('./forwarding-drafts.mjs');
+    const drafts = createForwardingDrafts({
+      ledger: createForwardingLedger(path.join(app.getPath('userData'), 'forwarding-ledger')),
+      // No verified personal-chat UI adapter is registered yet.
+    });
+    registerForwardingIpc(ipcMain, () => mainWindow, pathToFileURL(path.join(__dirname, 'shell.html')).href, drafts);
     ipcMain.handle('crosschat:tab-switch', (event, id) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
       chooseTab(id); return true;

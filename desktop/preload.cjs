@@ -10,4 +10,6 @@ contextBridge.exposeInMainWorld('crosschatDesktop', Object.freeze({
     ipcRenderer.on('crosschat:tab-status', (_event, data) => callback(data));
   },
   quit: () => ipcRenderer.invoke('crosschat:quit'),
+  prepareDraft: input => ipcRenderer.invoke('crosschat:draft-prepare', input),
+  executeDraft: (draftId, revision) => ipcRenderer.invoke('crosschat:draft-execute', draftId, revision),
 }));

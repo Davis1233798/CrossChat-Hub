@@ -17,6 +17,17 @@ app.whenReady().then(async () => {
     await delay(100);
   }
   if (!window?.isVisible()) throw new Error('No visible desktop window');
+  const composer = await window.webContents.executeJavaScript(`(async () => {
+    const draft = await window.crosschatDesktop.prepareDraft({text:'@line:測試群:小明 Hello'});
+    const attempt = await window.crosschatDesktop.executeDraft(draft.draftId,draft.revision);
+    const input = document.getElementById('compose-text'); input.focus();
+    const bounds = document.getElementById('composer').getBoundingClientRect();
+    return {status:draft.status,member:draft.preview?.memberName,attempt:attempt.status,
+      privatePlan:!draft.plan&&!draft.target,disabled:document.getElementById('compose-send').disabled,
+      focused:document.activeElement===input,top:bounds.top,bottom:bounds.bottom,height:innerHeight};
+  })()`);
+  if (composer.status !== 'unsupported' || composer.member !== '小明' || composer.attempt !== 'unsupported' ||
+      !composer.privatePlan || !composer.disabled || !composer.focused || composer.bottom > composer.height) throw new Error('Composer IPC/private unsupported state failed');
   const selected = () => window.webContents.executeJavaScript('document.querySelector("[data-tab][aria-selected=true]").dataset.tab');
   const choose = async key => {
     window.webContents.sendInputEvent({ type: 'keyDown', keyCode: key, modifiers: ['control'] });
@@ -43,6 +54,9 @@ app.whenReady().then(async () => {
   const views = window.contentView.children;
   if (views.length !== 1) throw new Error(`Expected one attached remote view, got ${views.length}`);
   const contents = views[0].webContents;
+  const composerTop = await window.webContents.executeJavaScript('document.getElementById("composer").getBoundingClientRect().top');
+  const remoteBounds = views[0].getBounds();
+  if (remoteBounds.y + remoteBounds.height > composerTop) throw new Error('Remote view overlaps composer');
   if (contents.getLastWebPreferences().nodeIntegration !== false) throw new Error('Remote Node integration enabled');
   console.log('PASS: visible native window, keyboard tab state, LINE limitation panel, isolated remote view; requesting normal close');
   clearTimeout(deadline);

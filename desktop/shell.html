@@ -37,5 +37,10 @@
   <section id="connecting" class="native-panel"><div class="spinner"></div><h2>載入官方聊天網站中</h2><p>首次使用請依該平台自己的登入流程完成驗證。</p></section>
   <section id="profile-state" class="native-panel" hidden><h2 id="profile-state-title"></h2><p id="profile-state-detail"></p></section>
 </main>
+<section id="composer" aria-label="跨軟體統一輸入">
+  <label for="compose-text">跨軟體訊息 <small>例如 @line:群組名:人名 要說的話；名稱含空白請用雙引號</small></label>
+  <textarea id="compose-text" rows="2" maxlength="16000" placeholder="@line:群組名 訊息內容" spellcheck="false"></textarea>
+  <div class="compose-actions"><button type="button" id="compose-preview">預覽目的地</button><button type="button" id="compose-send" disabled>傳送（尚未支援）</button><span id="compose-status" role="status">目前可解析目的地；個人聊天傳送尚未接通，不會發出訊息。</span></div>
+</section>
 </body>
 </html>

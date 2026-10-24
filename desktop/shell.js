@@ -79,4 +79,29 @@
     status.textContent = `${id} · ${labels[state] ?? state}`;
   });
   select(selected);
+  const composeText = document.getElementById('compose-text');
+  const composeStatus = document.getElementById('compose-status');
+  const previewButton = document.getElementById('compose-preview');
+  let draft = null, editVersion = 0;
+  composeText.addEventListener('input', () => {
+    editVersion++;
+    composeStatus.textContent = '內容已變更，請重新預覽目的地。尚未發送。';
+  });
+  previewButton.addEventListener('click', async () => {
+    const version = editVersion;
+    previewButton.disabled = true;
+    try {
+      const input = { text: composeText.value, ...(draft ? { draftId: draft.draftId, revision: draft.revision } : {}) };
+      const result = await window.crosschatDesktop.prepareDraft(input);
+      if (result.draftId) draft = { draftId: result.draftId, revision: result.revision };
+      if (version !== editVersion) return;
+      const p = result.preview;
+      if (p) composeStatus.textContent = `${p.platform} · 群組「${p.chatName}」${p.memberName ? ` · 提及「${p.memberName}」` : ''}。個人聊天傳送尚未支援，未發送。`;
+      else {
+        if (result.status === 'rejected') draft = null;
+        composeStatus.textContent = '無法解析目的地，請使用 @line:群組名[:人名] 訊息。未發送。';
+      }
+    } catch { composeStatus.textContent = '無法預覽目的地，未發送。'; }
+    finally { previewButton.disabled = false; }
+  });
 })();
