@@ -2,6 +2,38 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createForwardingDrafts } from '../desktop/forwarding-drafts.mjs';
 
+test('manual selection preserves declared provenance and rejects forged references/body', async () => {
+  const service = createForwardingDrafts();
+  const capture = service.captureSelection({ text: '原文\n第二行', platform: 'line', chatName: '測試群' });
+  assert.equal(capture.status, 'captured'); assert.equal(capture.provenance, 'user-confirmed-selection');
+  assert.match(capture.textDigest, /^[a-f0-9]{64}$/); assert.equal(capture.messageId, undefined);
+  const input = { selectionId: capture.selectionId, captureRevision: 1, routeText: '@slack:測試頻道' };
+  const result = await service.prepareSelection(input);
+  assert.equal(result.status, 'unsupported'); assert.equal(result.preview.text, '原文\n第二行');
+  assert.equal(result.source.provenance, 'user-confirmed-selection');
+  assert.equal((await service.prepareSelection({ ...input, routeText: '@slack:測試頻道 偽造內容' })).status, 'rejected');
+  assert.equal(service.captureSelection({ text: 'x', platform: 'line', chatName: '群', selectionId: 'forged' }).status, 'rejected');
+  assert.equal((await service.prepareSelection({ ...input, selectionId: 'guess' })).status, 'rejected');
+});
+test('selection deduplicates same target and permits another explicitly resolved target', async () => {
+  const { service, changeTarget, calls } = fixture();
+  const capture = service.captureSelection({ text: '原文', platform: 'telegram', chatName: '來源' });
+  const input = { selectionId: capture.selectionId, captureRevision: 1, routeText: '@line:測試群' };
+  const first = await service.prepareSelection(input);
+  assert.equal((await service.execute(first.draftId, first.revision)).status, 'submitted');
+  const repeat = await service.prepareSelection(input);
+  assert.equal((await service.execute(repeat.draftId, repeat.revision)).status, 'duplicate');
+  changeTarget(); const another = await service.prepareSelection(input);
+  assert.equal((await service.execute(another.draftId, another.revision)).status, 'submitted'); assert.equal(calls(), 2);
+  assert.equal((await service.prepare({ text, draftId: another.draftId, revision: another.revision })).status, 'rejected');
+});
+test('selection references expire and cannot be injected into compose inputs', async () => {
+  let clock = 0; const service = createForwardingDrafts({ now: () => clock, ttlMs: 10 });
+  const capture = service.captureSelection({ text: '原文', platform: 'line', chatName: '來源' }); clock = 11;
+  assert.equal((await service.prepareSelection({ selectionId: capture.selectionId, captureRevision: 1, routeText: '@slack:頻道' })).reason, 'selection-unavailable');
+  assert.equal((await service.prepare({ text, source: capture })).status, 'rejected');
+});
+
 const text = '@line:測試群:小明 Hello';
 function fixture(options = {}) {
   let calls = 0, target = { platform: 'line', accountId: 'a', chatId: 'chat' };

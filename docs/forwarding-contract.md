@@ -66,6 +66,20 @@ adapter registry is empty, so current calls return explicit unsupported previews
 and cannot send. Draft lifetime is in-memory; persistent retry/reconciliation
 still relies on the ledger and must not reconstruct a new draft to evade it.
 
+For explicit manual forwarding, `captureSelection({text, platform, chatName})`
+accepts a user's pasted-content declaration, **not a verified platform message**.
+Main generates opaque `selectionId`, capture revision, timestamp and body digest;
+display labels never become platform account/chat/message IDs. The body stays
+private; the ledger stores neither body nor digest.
+`prepareSelection({selectionId, captureRevision, routeText})` requires only a
+destination route and uses the captured body unchanged. These selection APIs
+have no desktop IPC/UI entry yet. The same selection and exact destination
+share a dedupe key; another destination requires a new explicit resolved preview.
+A new manual capture has a new ID, so separate copies of one original message
+cannot be deduplicated. Selection sources cannot carry forwarding traces or
+participate in unattended bidirectional bridges. Exact target/member checks
+remain unchanged; HWND/UIA runtime IDs are never passed off as platform IDs.
+
 Forwarding keeps the original platform/account/chat/message tuple in `trace`,
 plus visited chats. Same-chat, returning-to-origin, visited-chat and eight-hop
 routes are blocked. The stable key covers original source, exact destination

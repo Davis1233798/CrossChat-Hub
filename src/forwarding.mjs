@@ -46,8 +46,12 @@ const exactId = value => typeof value === 'string' && value.trim().length > 0;
 const validChat = chat => chat && platforms.has(chat.platform) && exactId(chat.accountId) && exactId(chat.chatId);
 const chatKey = chat => JSON.stringify([chat.platform, chat.accountId, chat.chatId]);
 const isCompose = source => source?.kind === 'compose' && exactId(source.draftId);
-const isForward = source => source?.kind !== 'compose' && validChat(source) && exactId(source.messageId);
-const sourceKey = source => isCompose(source) ? ['compose', source.draftId] : ['forward', source.platform, source.accountId, source.chatId, source.messageId];
+const isSelection = source => source?.kind === 'selection' && exactId(source.selectionId) && source.captureRevision === 1 &&
+  platforms.has(source.platform) && exactId(source.chatName) && source.provenance === 'user-confirmed-selection' &&
+  /^[a-f0-9]{64}$/.test(source.textDigest ?? '') && Number.isSafeInteger(source.capturedAt) && source.capturedAt >= 0;
+const isForward = source => !['compose', 'selection'].includes(source?.kind) && validChat(source) && exactId(source.messageId);
+const validSource = source => isCompose(source) || isSelection(source) || isForward(source);
+const sourceKey = source => isCompose(source) ? ['compose', source.draftId] : isSelection(source) ? ['selection', source.selectionId, source.captureRevision] : ['forward', source.platform, source.accountId, source.chatId, source.messageId];
 
 // resolveChat/resolveMember return arrays of exact adapter-owned IDs. Display
 // names never become IDs, and ambiguity is rejected rather than picking first.
@@ -55,7 +59,8 @@ const sourceKey = source => isCompose(source) ? ['compose', source.draftId] : ['
 export async function prepareForward({ route, source, attachments = [], trace = null }, adapter) {
   if (route?.status !== 'parsed' || !platforms.has(route.platform) || !exactId(route.chatName) ||
       typeof route.text !== 'string' || (route.memberName !== null && !exactId(route.memberName)) ||
-      (!isCompose(source) && !isForward(source))) return invalid('missing-exact-source-or-route');
+      !validSource(source)) return invalid('missing-exact-source-or-route');
+  if (isSelection(source) && (trace !== null || createHash('sha256').update(route.text).digest('hex') !== source.textDigest)) return invalid('selection-content-or-trace-mismatch');
   if (!Array.isArray(attachments)) return invalid('invalid-attachments');
   if (attachments.some(a => !a || !exactId(a.id) || !exactId(a.name) || !exactId(a.mimeType) || !Number.isSafeInteger(a.size) || a.size < 0)) return invalid('invalid-attachment-manifest');
   if (!route.text.trim() && !attachments.length) return invalid('empty-message');
@@ -79,7 +84,7 @@ export async function prepareForward({ route, source, attachments = [], trace = 
   if (isCompose(source) && trace !== null) return invalid('compose-cannot-carry-forward-trace');
   const origin = trace?.origin ?? source;
   const visited = trace?.visited ?? [];
-  if ((!isCompose(origin) && !isForward(origin)) || !Array.isArray(visited) || visited.some(c => !validChat(c))) return invalid('invalid-forward-trace');
+  if (!validSource(origin) || isSelection(trace?.origin) || !Array.isArray(visited) || visited.some(c => !validChat(c))) return invalid('invalid-forward-trace');
   if (visited.length >= 8 || [source, origin, ...visited].filter(validChat).some(c => chatKey(c) === chatKey(target))) return { status: 'blocked', reason: 'forward-loop' };
   const dedupeKey = createHash('sha256').update(JSON.stringify([sourceKey(origin), target.platform, target.accountId, target.chatId, mention?.memberId ?? null])).digest('hex');
   return { status: 'prepared', plan: { version: 1, source: { ...source }, target: { ...target }, mention,
@@ -93,13 +98,15 @@ export async function prepareForward({ route, source, attachments = [], trace = 
 export async function executeForward(prepared, adapter, ledger) {
   const plan = prepared?.plan;
   if (prepared?.status !== 'prepared' || !plan || plan.version !== 1 || !validChat(plan.target) ||
-      (!isCompose(plan.source) && !isForward(plan.source)) || typeof plan.text !== 'string' ||
+      !validSource(plan.source) || typeof plan.text !== 'string' ||
       !Array.isArray(plan.attachments) || plan.attachments.some(a => !a || !exactId(a.id) || !exactId(a.name) || !exactId(a.mimeType) || !Number.isSafeInteger(a.size) || a.size < 0) ||
       (!plan.text.trim() && !plan.attachments.length) ||
       (plan.mention !== null && (!plan.mention || !exactId(plan.mention.memberId) || plan.mention.required !== true)) ||
-      (!isCompose(plan.trace?.origin) && !isForward(plan.trace?.origin)) ||
+      !validSource(plan.trace?.origin) ||
       !Array.isArray(plan.trace?.visited) || plan.trace.visited.some(c => !validChat(c)) || plan.trace.visited.length > 8 ||
       [plan.source, plan.trace.origin, ...plan.trace.visited].filter(validChat).some(c => chatKey(c) === chatKey(plan.target))) return invalid('invalid-prepared-plan');
+  if (isSelection(plan.source) && (createHash('sha256').update(plan.text).digest('hex') !== plan.source.textDigest ||
+      JSON.stringify(plan.source) !== JSON.stringify(plan.trace.origin) || plan.trace.visited.length)) return invalid('invalid-prepared-plan');
   const expectedKey = createHash('sha256').update(JSON.stringify([sourceKey(plan.trace.origin), plan.target.platform, plan.target.accountId, plan.target.chatId, plan.mention?.memberId ?? null])).digest('hex');
   if (plan.dedupeKey !== expectedKey) return invalid('invalid-prepared-plan');
   if (prepared?.status !== 'prepared' || !plan || !adapter ||
