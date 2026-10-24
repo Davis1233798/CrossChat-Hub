@@ -35,8 +35,9 @@ so it cannot accidentally send a DM to alias `group`.
    Unsupported attachments or mentions fail before execution, never disappear.
 4. `executeForward(prepared, adapter, ledger)` needs a persistent ledger with
    atomic durable `claim(dedupeKey)` and `settle(key, outcome)` operations.
-   No production ledger or personal UI adapter is supplied yet. Test doubles
-   prove orchestration only. A send exception or insufficient receipt is
+   `desktop/forwarding-ledger.cjs` now supplies an unconnected filesystem ledger
+   intended for a main-process-owned directory under Electron `userData`.
+   No personal UI adapter or desktop send integration is supplied yet. A send exception or insufficient receipt is
    `unknown`, stays claimed, and requires target-chat reconciliation before
    retry. It must not be automatically retried like the old Bot outbox.
 5. Execution returns `submitted` only with the exact target and target message
@@ -62,3 +63,21 @@ must not enable unattended bidirectional forwarding.
 No account was accessed and no message was sent to test this module. Actual
 LINE selection, mention notification, attachment transfer and cross-client
 end-to-end forwarding remain unverified.
+
+The filesystem ledger uses exclusive `wx` creation per SHA-256 key and flushes
+the reservation before returning a successful claim. Separate processes race
+for the same path rather than trusting in-memory locks. Immutable terminal
+records store only submission message ID and exact target metadata; arbitrary
+adapter fields and message bodies are excluded. Restarted readers interpret an
+unsettled or partially written record as `unknown`, without modifying a live
+writer's reservation. Keys are never released automatically. Repeating the same
+settlement is idempotent; conflicting changes fail. I/O errors propagate before
+execution or leave the reservation blocked after execution.
+
+This uses only built-in `node:fs`/`node:path`, avoiding a native SQLite module
+and Electron ABI dependency. The local Node runtime is 24.0.2; Electron's
+`node:sqlite` availability was not established, so it is not assumed. File
+flushes protect against normal process crashes; portable Node APIs cannot
+guarantee Windows directory-entry persistence under sudden power loss. This is
+not an exactly-once network guarantee. Reconciliation and retention management
+remain necessary before an actual send adapter can ship.
