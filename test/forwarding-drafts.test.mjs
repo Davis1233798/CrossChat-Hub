@@ -2,6 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createForwardingDrafts } from '../desktop/forwarding-drafts.mjs';
 
+test('revoking a source while recipient revalidation awaits prevents stale dispatch', async () => {
+  let release, delayed = false, calls = 0;
+  const gate = new Promise(resolve => release = resolve);
+  const adapter = { platform: 'slack', accountKind: 'personal', capabilities: { sendText: true },
+    resolveChat: async () => { if (delayed) await gate; return [{ platform: 'slack', accountId: 'owned-a', chatId: 'owned-c' }]; },
+    execute: async () => { calls++; throw new Error('Must not dispatch'); } };
+  const service = createForwardingDrafts({ adapterFor: () => adapter,
+    ledger: { claim() { throw new Error('Must not claim revoked source'); }, settle() {} } });
+  const capture = service.captureSelection({ text: 'Owned original', platform: 'line', chatName: 'Owned source' });
+  const ref = { selectionId: capture.selectionId, captureRevision: capture.captureRevision };
+  const draft = await service.prepareSelection({ ...ref, routeText: '@slack:OwnedDestination' });
+  assert.equal(draft.status, 'prepared'); delayed = true;
+  const pending = service.execute(draft.draftId, draft.revision);
+  assert.equal(service.revokeSelection(ref).status, 'revoked'); release();
+  assert.equal((await pending).status, 'rejected'); assert.equal(calls, 0);
+});
+
 test('manual selection preserves declared provenance and rejects forged references/body', async () => {
   const service = createForwardingDrafts();
   const capture = service.captureSelection({ text: '原文\n第二行', platform: 'line', chatName: '測試群' });

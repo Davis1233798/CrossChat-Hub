@@ -84,7 +84,11 @@ export function createForwardingDrafts({ adapterFor = () => null, ledger, now = 
       const selected = selections.get(input.selectionId);
       if (!selected || selected.source.captureRevision !== input.captureRevision) return rejected('selection-unavailable');
       selections.delete(input.selectionId);
-      for (const [id, draft] of drafts) if (draft.source?.selectionId === input.selectionId && !draft.executing) drafts.delete(id);
+      for (const [id, draft] of drafts) if (draft.source?.selectionId === input.selectionId) {
+        // Revocation during awaited recipient resolution must invalidate the
+        // pending send too. Once dispatch starts, its outcome needs reconciliation.
+        if (!draft.dispatched) drafts.delete(id);
+      }
       return { status: 'revoked' };
     },
     async execute(id, revision) {
@@ -103,6 +107,7 @@ export function createForwardingDrafts({ adapterFor = () => null, ledger, now = 
         }
         // Once dispatch starts, do not allow draft edits to create another send.
         draft.terminal = true;
+        draft.dispatched = true;
         const result = await executeForward(draft.plan, adapter, ledger);
         // Do not leak adapter receipt/target IDs into the shell.
         return { status: result.status, ...(result.reason ? { reason: result.reason } : {}) };
