@@ -284,11 +284,14 @@ internal static class HubBroker {
     if(d.Count!=4||!d.ContainsKey("sequence"))throw new Exception("Invalid detach-host request");
     if(lineAttached) {
 #if LINE_PRODUCT_FIXTURE
-      if(failNextFixtureRestore) { failNextFixtureRestore=false;if(lineRecoveryButton!=null)lineRecoveryButton.Visible=true;Emit("line-restore-failed","restored",false,"alive",LineAlive,"message","Owned fixture injected a one-time restore failure.");return; }
+      bool injectedFailure=failNextFixtureRestore;failNextFixtureRestore=false;
 #endif
       try { RestoreFixture(); } catch(Exception ex) { error="LINE restore failed: "+ex.Message; }
+#if LINE_PRODUCT_FIXTURE
+      if(injectedFailure) { chatRestored=false;error="Owned fixture injected a one-time LINE restoration read-back failure.";rollbackVerified=false; }
+#endif
       if(!chatRestored) { error=error??"LINE restoration read-back did not match the saved window state.";if(lineRecoveryButton!=null)lineRecoveryButton.Visible=true;Emit("line-restore-failed","restored",false,"alive",LineAlive,"message",error);return; }
-      lineAttached=false;lineVisible=false;chatChanged=false;
+      lineAttached=false;lineVisible=false;chatChanged=false;error=null;
     }
 #if LINE_PRODUCT_FIXTURE
     if(fixture!=null&&chatRestored) { try { fixture.CloseMainWindow();fixture.WaitForExit(5000); } catch {} fixture.Dispose();fixture=null;chat=IntPtr.Zero; }
@@ -524,7 +527,13 @@ internal static class HubBroker {
     if(mixed) { rootHosting=GetWindowDpiHostingBehavior(rootHandle);paneHosting=GetWindowDpiHostingBehavior(paneHandle);SetThreadDpiHostingBehavior(previousHosting); }
     root.Resize+=delegate { try { Layout(); }catch(Exception ex){Fail(ex.Message);} };
     root.FormClosing+=delegate(object sender,FormClosingEventArgs e) {
-      if(error!=null && !rollbackVerified && ((IsWindow(hub)&&GetAncestor(hub,2)==root.Handle)||(IsWindow(chat)&&GetAncestor(chat,2)==root.Handle))) { e.Cancel=true; return; }
+      if(error!=null && !rollbackVerified && ((IsWindow(hub)&&GetAncestor(hub,2)==root.Handle)||(IsWindow(chat)&&GetAncestor(chat,2)==root.Handle))) {
+        e.Cancel=true;
+#if LINE_PRODUCT
+        if(!controller.HasExited)RequestHostClose();
+#endif
+        return;
+      }
 #if LINE_STUDY
       if(!chatRestored&&chatChanged) {e.Cancel=true;DetachLine();return;}
 #elif LINE_PRODUCT
