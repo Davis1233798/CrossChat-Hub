@@ -47,6 +47,10 @@ test('wrong id/nonce/window, fake platform message IDs, malformed or oversized o
 test('focus/provider failure stays unsupported and timeout terminates only owned helper', async () => {
   const noFocus = fixture(r=>({...r,ok:false,error:'focus-outside-target'}));
   assert.equal((await noFocus.client.observe('line')).reason,'focus-outside-target');
+  const provider = fixture(r=>({...r,ok:false,error:'observation-provider-unavailable-focus-ancestry'}));
+  assert.equal((await provider.client.observe('line')).reason,'observation-provider-unavailable-focus-ancestry');
+  const arbitrary = fixture(r=>({...r,ok:false,error:'unexpected raw private exception'}));
+  assert.equal((await arbitrary.client.observe('line')).reason,'selection-observation-unavailable');
   const stalled = fixture(()=>null);
   assert.equal((await stalled.client.observe('line')).reason,'selection-observation-timeout'); assert.equal(stalled.kills(),1);
 });

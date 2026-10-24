@@ -55,6 +55,17 @@ provider capabilities. This selected-text success is specific to the owned WPF
 control; it is not a guarantee for arbitrary applications or LINE providers.
 No actual LINE window was observed.
 
+A later product-client diagnosis established that its generic refusal occurred
+after request decoding, within observation, rather than a JSON/nonce framing
+failure. The helper now reports only fixed phase codes for validation, focus,
+focused-owner/ancestry and TextPattern selection failures; the client preserves
+those allowlisted codes and suppresses arbitrary exception text. The next
+focused fixture attempt encountered an explicit computer-use user-input conflict
+and changed fixture contents, so UI input stopped. That run is not a controlled
+selection test and does not establish a repair. Its fixture exited normally with
+no helper/fixture process remaining. A known, uncontended owned selection is
+still required to isolate the exact provider phase and prove the product client.
+
 Future LINE dryrun must first inspect its actual provider through the applicable
 computer-use skill, then explicitly authorize a product test against that
 selected window. This synthetic result establishes neither a valid LINE header

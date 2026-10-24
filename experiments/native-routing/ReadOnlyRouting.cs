@@ -15,6 +15,7 @@ internal static class ReadOnlyRouting {
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
   static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 32768, RecursionLimit = 12 };
   static int pid; static long ticks; static string exe, nonce; static IntPtr hwnd;
+  static string observationPhase = "validate";
   static string Limited(string value, int max) { if (value == null) return ""; if (value.Length > max) throw new Exception("value-limit"); return value; }
   static void Keys(Dictionary<string, object> obj, params string[] allowed) {
     foreach (string key in obj.Keys) if (Array.IndexOf(allowed, key) < 0) throw new Exception("invalid-schema");
@@ -38,6 +39,7 @@ internal static class ReadOnlyRouting {
     return false;
   }
   static object Observe(Dictionary<string, object> request) {
+    observationPhase = "validate";
     string op = request["op"] as string;
     if (op == "observe-header") Keys(request, "v", "id", "op", "nonce", "path");
     else Keys(request, "v", "id", "op", "nonce");
@@ -45,9 +47,15 @@ internal static class ReadOnlyRouting {
     AutomationElement root = Validate();
     if (op == "probe") return new { witness = Witness(), windowTitle = Limited(root.Current.Name, 1024), provenance = "window-property-only" };
     if (op == "observe-selection") {
+      observationPhase = "focus";
       AutomationElement focused = AutomationElement.FocusedElement;
-      if (focused == null || focused.Current.ProcessId != pid || !Within(focused, root)) throw new Exception("focus-outside-target");
+      observationPhase = "focus-owner";
+      if (focused == null || focused.Current.ProcessId != pid) throw new Exception("focus-outside-target");
+      observationPhase = "focus-ancestry";
+      if (!Within(focused, root)) throw new Exception("focus-outside-target");
+      observationPhase = "text-pattern";
       object value; if (!focused.TryGetCurrentPattern(TextPattern.Pattern, out value)) throw new Exception("selection-unsupported");
+      observationPhase = "text-selection";
       TextPatternRange[] ranges = ((TextPattern)value).GetSelection();
       if (ranges.Length != 1) throw new Exception("single-selection-required");
       string text = ranges[0].GetText(16001);
@@ -92,15 +100,17 @@ internal static class ReadOnlyRouting {
       for (;;) {
         string line = ReadLineBounded(); if (line == null) return 0;
         string id = null;
+        string phase = "decode";
         try {
           Dictionary<string, object> request = Json.DeserializeObject(line) as Dictionary<string, object>;
           if (request == null || !(request["id"] is string)) throw new Exception();
           id = Limited((string)request["id"], 64);
+          phase = "observe";
           object result = Observe(request);
           Console.WriteLine(Json.Serialize(new { v = 1, id, nonce, ok = true, result }));
         } catch (Exception error) {
           string[] safe = { "selection-unsupported", "focus-outside-target", "single-selection-required", "empty-selection", "header-not-unique", "invalid-schema", "invalid-request", "session-mismatch", "window-mismatch", "window-unavailable", "value-limit" };
-          Console.WriteLine(Json.Serialize(new { v = 1, id, nonce, ok = false, error = Array.IndexOf(safe, error.Message) >= 0 ? error.Message : "request-or-target-unavailable" }));
+          Console.WriteLine(Json.Serialize(new { v = 1, id, nonce, ok = false, error = Array.IndexOf(safe, error.Message) >= 0 ? error.Message : phase == "decode" ? "request-decode-failed" : "observation-provider-unavailable-" + observationPhase }));
         }
       }
     } catch { Console.Error.WriteLine("Read-only target unavailable"); return 2; }

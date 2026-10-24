@@ -41,7 +41,14 @@ export function createNativeSelectionClient({ binaryPath, witnessFor = () => nul
               if (code !== 0) throw new Error();
               const result = JSON.parse(output + decoder.end());
               if (result.v !== 1 || result.id !== id || result.nonce !== nonce || typeof result.ok !== 'boolean') throw new Error();
-              if (!result.ok) { unavailable(['selection-unsupported', 'focus-outside-target', 'empty-selection', 'single-selection-required'].includes(result.error) ? result.error : 'selection-observation-unavailable'); return; }
+              if (!result.ok) {
+                const safe = ['selection-unsupported', 'focus-outside-target', 'empty-selection', 'single-selection-required',
+                  'request-decode-failed', 'invalid-schema', 'invalid-request', 'session-mismatch', 'window-mismatch', 'window-unavailable',
+                  'observation-provider-unavailable-validate', 'observation-provider-unavailable-focus',
+                  'observation-provider-unavailable-focus-owner', 'observation-provider-unavailable-focus-ancestry',
+                  'observation-provider-unavailable-text-pattern', 'observation-provider-unavailable-text-selection'];
+                unavailable(safe.includes(result.error) ? result.error : 'selection-observation-unavailable'); return;
+              }
               const r = result.result, w = r?.witness;
               if (!w || w.pid !== witness.pid || w.startTicks !== witness.startTicks || w.hwnd !== witness.hwnd ||
                   w.executable.toLowerCase() !== basename(witness.exe).toLowerCase() || r.provenance !== 'ui-selected-text' ||
