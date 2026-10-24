@@ -122,7 +122,15 @@ export async function executeForward(prepared, adapter, ledger) {
   }
   if (typeof adapter.validatePlan === 'function' && !adapter.validatePlan(structuredClone(plan))) return { status: 'rejected', reason: 'destination-or-account-changed' };
   // Throwing here prevents sending when the durable store is unavailable.
-  if (!await ledger.claim(plan.dedupeKey)) return { status: 'duplicate' };
+  let routing = null;
+  if (typeof adapter.historyMetadata === 'function') {
+    try { routing = adapter.historyMetadata(structuredClone(plan)); }
+    catch { return { status: 'rejected', reason: 'destination-metadata-unavailable' }; }
+    if (plan.target.platform === 'slack' && (routing?.version !== 1 || routing.platform !== 'slack' || routing.chatId !== plan.target.chatId || !/^T[A-Z0-9]+$/.test(routing.teamId ?? ''))) {
+      return { status: 'rejected', reason: 'destination-metadata-unavailable' };
+    }
+  }
+  if (!await ledger.claim(plan.dedupeKey, routing)) return { status: 'duplicate' };
   let receipt;
   try { receipt = await adapter.execute(structuredClone(plan)); }
   catch {

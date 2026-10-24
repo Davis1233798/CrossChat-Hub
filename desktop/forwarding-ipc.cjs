@@ -1,5 +1,5 @@
 'use strict';
-function registerForwardingIpc(ipcMain, getWindow, shellUrl, drafts, lineBinding = null, selectionArming = null, slackDestinations = null) {
+function registerForwardingIpc(ipcMain, getWindow, shellUrl, drafts, lineBinding = null, selectionArming = null, slackDestinations = null, openHistorySlack = null) {
   const trusted = event => {
     const window = getWindow();
     return window && !window.isDestroyed() && event.sender === window.webContents &&
@@ -13,6 +13,16 @@ function registerForwardingIpc(ipcMain, getWindow, shellUrl, drafts, lineBinding
     if (!trusted(event)) throw new Error('Untrusted composer sender');
     if (typeof id !== 'string' || !Number.isSafeInteger(revision) || revision < 1) throw new Error('Invalid draft reference');
     return drafts.execute(id, revision);
+  });
+  ipcMain.handle('crosschat:forward-history-list', (event, ...args) => {
+    if (!trusted(event)) throw new Error('Untrusted composer sender');
+    if (args.length) throw new Error('Invalid history request');
+    return drafts.listHistory();
+  });
+  if (openHistorySlack) ipcMain.handle('crosschat:forward-history-open-slack', (event, ref, ...args) => {
+    if (!trusted(event)) throw new Error('Untrusted composer sender');
+    if (args.length || typeof ref !== 'string' || ref.length > 64) throw new Error('Invalid history reference');
+    return openHistorySlack(ref);
   });
   for (const [channel, method] of [['selection-capture', 'captureSelection'], ['selection-prepare', 'prepareSelection'], ['selection-revoke', 'revokeSelection']]) {
     ipcMain.handle(`crosschat:${channel}`, (event, input) => {

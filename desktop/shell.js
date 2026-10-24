@@ -353,4 +353,31 @@
         : `尚未送出：${result.reason || result.status}。請重新預覽。`;
     } catch { draft = null; composeStatus.textContent = '傳送狀態無法確認；請先到 Slack 核對，切勿直接重試。'; }
   });
+  const historyList = document.getElementById('history-list');
+  document.getElementById('history-reload').addEventListener('click', async event => {
+    const button = event.currentTarget; button.disabled = true;
+    try {
+      const rows = await window.crosschatDesktop.listForwardHistory();
+      historyList.replaceChildren();
+      if (!rows.length) { const li = document.createElement('li'); li.textContent = '目前沒有可列出的傳送紀錄。'; historyList.append(li); return; }
+      for (const row of rows.slice(0, 20)) {
+        const li = document.createElement('li');
+        const when = Number.isFinite(row.time) ? new Date(row.time).toLocaleString() : '時間不明';
+        const status = row.status === 'submitted' ? 'Slack API 已受理；不代表送達或已讀' : '結果不明。請到目的地核對，勿重送';
+        li.textContent = `${when} · ${row.platform || '平台不明'}${row.targetChatId ? ` · ${row.targetChatId}` : ''} · ${status}`;
+        if (row.openSlack === true && row.platform === 'slack') {
+          const open = document.createElement('button'); open.type = 'button'; open.className = 'history-open'; open.textContent = '開啟 Slack 目的聊天室';
+          open.addEventListener('click', async () => {
+            open.disabled = true;
+            try { const opened = await window.crosschatDesktop.openForwardHistorySlack(row.id); if (!opened) composeStatus.textContent = '無法安全開啟此聊天室；請在 Slack 中自行核對。'; }
+            catch { composeStatus.textContent = '無法開啟 Slack 目的聊天室。'; }
+            finally { open.disabled = false; }
+          });
+          li.append(document.createTextNode(' '), open);
+        }
+        historyList.append(li);
+      }
+    } catch { historyList.textContent = '無法讀取本機紀錄。'; }
+    finally { button.disabled = false; }
+  });
 })();

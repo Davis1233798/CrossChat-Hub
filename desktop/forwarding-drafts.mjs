@@ -66,6 +66,7 @@ export function createForwardingDrafts({ adapterFor = () => null, observeSelecti
       return summary(draft);
     }
   return {
+    listHistory() { return ledger?.listRecent?.(20) ?? []; },
     prepare: input => prepare(input),
     async captureObservedSelection(input) {
       if (!input || typeof input !== 'object' || Object.keys(input).some(k => !['platform', 'chatName'].includes(k)) ||

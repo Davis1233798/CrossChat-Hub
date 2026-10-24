@@ -17,7 +17,7 @@ const json = body => new Response(JSON.stringify(body), { headers: { 'content-ty
 
 async function setup(t, { delayPost = null } = {}) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'crosschat-slack-forward-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(async () => { accountService.close(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }); });
   let posts = 0;
   let authGate = null, authGateAt = Infinity, authChecks = 0;
   const api = createSlackUserApi({ fetchFn: async (url, request) => {

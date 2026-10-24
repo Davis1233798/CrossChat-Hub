@@ -20,6 +20,8 @@ export function createSlackPersonalAdapter({ accountService, userApi, destinatio
   return Object.freeze({
     platform: 'slack', accountKind: 'personal', capabilities: Object.freeze({ sendText: true, nativeMention: false, attachments: false }),
     validatePlan: plan => current() && plan.target.accountId === target.accountId && plan.target.chatId === target.chatId,
+    historyMetadata: plan => current() && plan.target.platform === 'slack' && plan.target.chatId === target.chatId
+      ? { version: 1, platform: 'slack', teamId: selection.teamId, chatId: target.chatId } : null,
     preflight: async plan => {
       if (!current() || plan.target.accountId !== target.accountId || plan.target.chatId !== target.chatId || plan.mention || plan.attachments.length) return { status: 'rejected' };
       const result = await accountService.withVerifiedAccount({ accountId: target.accountId, teamId: selection.teamId, userId: account.account.userId }, async () => ({ status: 'ready' }));

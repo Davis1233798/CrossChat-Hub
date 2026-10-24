@@ -25,7 +25,7 @@ const brokerStudy = require('./native-broker-study.cjs').configureBrokerStudy(ap
 // This is not an API bridge: no password interception, cookie export, or
 // injection into a remote messenger is performed.
 const HEADER_HEIGHT = 116;
-const COMPOSER_HEIGHT = 230;
+const COMPOSER_HEIGHT = 300;
 const singleInstance = app.requestSingleInstanceLock();
 let mainWindow = null;
 let currentId = null;
@@ -368,6 +368,7 @@ if (singleInstance) {
       binaryPath: nativePaths.readOnlyRouting,
       witnessFor: platform => lineBinding.witnessFor(platform),
     });
+    const ledger = createForwardingLedger(path.join(app.getPath('userData'), 'forwarding-ledger'));
     const drafts = createForwardingDrafts({
       validateDestination: selectionId => smokeHooks?.slackDestination?.resolveSelection(selectionId) ?? slackDestinationSnapshots.resolveSelection(selectionId),
       adapterFor: (platform, destination, sourceValid) => {
@@ -378,7 +379,7 @@ if (singleInstance) {
           selectedAccount: status.state === 'connected' ? status.account : null, sourceValid });
       },
       observeSelection: platform => smokeHooks ? smokeHooks.observeSelection(platform) : process.platform === 'win32' ? selectionClient.observe(platform) : Promise.resolve({ status: 'unsupported', reason: 'selection-helper-unavailable' }),
-      ledger: createForwardingLedger(path.join(app.getPath('userData'), 'forwarding-ledger')),
+      ledger,
       // No verified personal-chat UI adapter is registered yet.
     });
     const selectionArming = createSelectionArming({
@@ -413,7 +414,16 @@ if (singleInstance) {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
       return slackAccount.disconnect();
     });
-    registerForwardingIpc(ipcMain, () => mainWindow, pathToFileURL(path.join(__dirname, 'shell.html')).href, drafts, lineBinding, selectionArming, slackDestinationSnapshots);
+    registerForwardingIpc(ipcMain, () => mainWindow, pathToFileURL(path.join(__dirname, 'shell.html')).href, drafts, lineBinding, selectionArming, slackDestinationSnapshots, ref => {
+      const route = ledger.resolveHistorySlackRoute(ref);
+      if (!route || closing || profileReset.isBlocked('slack')) return false;
+      chooseTab('slack');
+      const view = views.get('slack');
+      if (!view || view.webContents.isDestroyed()) return false;
+      const url = `https://app.slack.com/client/${route.teamId}/${route.chatId}`;
+      view.webContents.loadURL(url).catch(() => announce('slack', 'failed'));
+      return true;
+    });
     ipcMain.handle('crosschat:tab-switch', (event, id) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
       chooseTab(id); return true;
