@@ -14,6 +14,7 @@ const { createLineBinding } = require('./line-binding.cjs');
 const { createLineWitnessClient } = require('./line-witness-client.cjs');
 const { createSelectionArming } = require('./selection-arming.cjs');
 const { isOfficialOrigin, canCheckPermission, needsUserApproval } = require('./permissions.cjs');
+const { nativeHelperPaths } = require('./native-helper-paths.cjs');
 // Must precede single-instance lock AND every profile-backed store/session.
 const brokerStudy = require('./native-broker-study.cjs').configureBrokerStudy(app);
 
@@ -309,10 +310,11 @@ if (singleInstance) {
     if (brokerStudy) await brokerStudy.start();
     const { createForwardingDrafts } = await import('./forwarding-drafts.mjs');
     const { createNativeSelectionClient } = await import('./native-selection-client.mjs');
+    const nativePaths = nativeHelperPaths({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() });
     const smokeHooks = process.env.CROSSCHAT_PRODUCT_SMOKE === '1' && path.basename(process.argv[1] ?? '') === 'desktop-smoke.cjs'
       ? globalThis[Symbol.for('crosschat.productSmokeHooks')] : null;
-    const lineWitness = process.platform === 'win32' && !app.isPackaged ? createLineWitnessClient({
-      binaryPath: path.join(__dirname, '..', 'build', 'bin', 'native-host', 'LineWitness.exe'),
+    const lineWitness = process.platform === 'win32' ? createLineWitnessClient({
+      binaryPath: nativePaths.lineWitness,
     }) : null;
     const fixtureWitness = { pid: 8123, startTicks: '420024', hwnd: '9123', path: 'C:\\fixtures\\LINE.exe',
       publisher: 'Synthetic Routing Fixture', sha256: 'f'.repeat(64), dpiContext: 'synthetic-fixture' };
@@ -321,11 +323,11 @@ if (singleInstance) {
       validateWitness: witness => smokeHooks ? Promise.resolve({ ...witness }) : lineWitness ? lineWitness.validateWitness(witness) : Promise.reject(new Error('LINE binding helper unavailable')),
     });
     const selectionClient = smokeHooks ? null : createNativeSelectionClient({
-      binaryPath: path.join(__dirname, '..', 'build', 'bin', 'native-routing', 'ReadOnlyRouting.exe'),
+      binaryPath: nativePaths.readOnlyRouting,
       witnessFor: platform => lineBinding.witnessFor(platform),
     });
     const drafts = createForwardingDrafts({
-      observeSelection: platform => smokeHooks ? smokeHooks.observeSelection(platform) : selectionClient.observe(platform),
+      observeSelection: platform => smokeHooks ? smokeHooks.observeSelection(platform) : process.platform === 'win32' ? selectionClient.observe(platform) : Promise.resolve({ status: 'unsupported', reason: 'selection-helper-unavailable' }),
       ledger: createForwardingLedger(path.join(app.getPath('userData'), 'forwarding-ledger')),
       // No verified personal-chat UI adapter is registered yet.
     });

@@ -2,10 +2,21 @@
 
 This product-owned .NET Framework x64 helper uses public Windows UI Automation.
 It contains no send, click, keyboard, credential, private LINE API, cookie or
-protocol code. It does not package the agent's computer-use runtime. It is not
-registered as a working LINE adapter, and is not in production packaging.
+protocol code. It does not package the agent's computer-use runtime. The helper
+is not registered as a working LINE adapter; packaging only makes the fixed
+read-only helper available to trusted main-process operations.
 
-Developer build: `powershell -NoProfile -File experiments/native-routing/build.ps1`.
+The Windows product package includes only this helper and `LineWitness.exe`.
+`npm run build:native:windows` builds those two fixed helpers reproducibly into
+ignored `build/bin/` staging; electron-builder's Windows-only `beforePack` hook
+does the same when needed. Windows packages place them under `resources/native/`.
+The `--self-test` switch checks .NET runtime and JSON protocol serialization only;
+it does not initialize UI Automation, inspect a window, or read text. After a
+Windows directory package, run `npm run smoke:native:resources --
+"C:\\path\\to\\win-unpacked\\resources"` to check the packaged files and
+self-tests. macOS packaging does not include or require these resources.
+
+Developer study build: `powershell -NoProfile -File experiments/native-routing/build.ps1`.
 Owned fixture check: `node experiments/native-routing/smoke.mjs`.
 Main-owned client end-to-end check: `node experiments/native-routing/client-smoke.mjs`.
 Outputs are ignored under `build/bin/native-routing/`; fixture startup metadata

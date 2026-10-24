@@ -105,6 +105,12 @@ internal static class ReadOnlyRouting {
   }
   [MTAThread] static int Main(string[] args) {
     try {
+      if (args.Length == 1 && args[0] == "--self-test") {
+        var probe = Json.DeserializeObject(Json.Serialize(new { v = 1, type = "ready", protocol = 1 })) as Dictionary<string, object>;
+        if (probe == null || Convert.ToInt32(probe["v"]) != 1 || Convert.ToInt32(probe["protocol"]) != 1) return 1;
+        Console.WriteLine(Json.Serialize(new { ok = true, protocol = 1, runtime = Environment.Version.ToString() }));
+        return 0;
+      }
       // GUI-subsystem helpers must use inherited pipes directly. Changing
       // Console.InputEncoding can require a console that intentionally does
       // not exist, and must not create/activate a console to read selected UI.

@@ -66,6 +66,13 @@ internal static class LineWitness {
     window=new IntPtr(long.Parse((string)current["hwnd"]));return Process.GetProcessById(Convert.ToInt32(current["pid"]));
   }
   static int Main(string[] args) {
+    if(args.Length==1&&args[0]=="--self-test") {
+      try {
+        var probe=Json.DeserializeObject(Json.Serialize(new {v=1,type="ready",protocol=1})) as Dictionary<string,object>;
+        if(probe==null||Convert.ToInt32(probe["v"])!=1||Convert.ToInt32(probe["protocol"])!=1)return 1;
+        Console.WriteLine(Json.Serialize(new {ok=true,protocol=1,runtime=Environment.Version.ToString()}));return 0;
+      } catch { return 1; }
+    }
     if(args.Length==2&&args[0]=="--protocol"&&System.Text.RegularExpressions.Regex.IsMatch(args[1],"^[a-f0-9]{48}$"))return ProtocolMain(args[1]);
     if(args.Length!=0)return 2;
     try {Console.WriteLine(new JavaScriptSerializer().Serialize(Capture()));return 0;}
