@@ -204,6 +204,16 @@ the user's actual Slack authentication has not completed; login/session success
 must not be inferred. New product checks must cover these source changes before
 the earlier green matrix can be treated as current-code evidence.
 
+At code `238ca55`, local `npm run check`, 77 unit/mock tests, 15 isolated
+fixture mocks and fixture/new-module syntax checks pass. The Slack workspace
+preference stores only a canonical `https://app.slack.com/client/T...` route,
+discarding channel paths, query and fragment data. Storage uses a dedicated
+main-owned preference file and clears it with Slack's local reset. Unit tests
+exercise validation/write/reload/reset, not authenticated Slack navigation.
+The existing five-process synthetic session smoke also passed locally; it does
+not specifically verify the new workspace preference across authenticated
+processes. Actual Slack authentication/session persistence remains unverified.
+
 The five-platform personal-account, LINE same-window product integration,
 send/receive/restart/logout, authorized routing, old-version upgrades/coexistence
 and signing/release gates remain open. Native experiments stay outside packaging.
