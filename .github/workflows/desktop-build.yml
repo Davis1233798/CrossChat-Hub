@@ -87,20 +87,31 @@ jobs:
             compgen -G 'dist/*.zip' >/dev/null
           fi
           ls -lh dist/
+      - name: Mock-test Windows installer failure diagnostics
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: ./scripts/windows-install-smoke-diagnostics-test.ps1
       - name: Smoke-test Windows install, running reinstall, relaunch and uninstall
+        id: windows_install_smoke
         if: matrix.platform == 'win'
         shell: pwsh
         run: ./scripts/windows-install-smoke.ps1
       - name: Upload Windows installer smoke diagnostics
-        if: always() && matrix.platform == 'win'
+        if: always() && matrix.platform == 'win' && steps.windows_install_smoke.outputs.diagnostics_directory != ''
         uses: actions/upload-artifact@v4
         with:
           name: windows-install-smoke-diagnostics
           if-no-files-found: warn
           retention-days: 7
-          path: |
-            ${{ runner.temp }}/crosschat-windows-install-smoke/**
-            dist/CrossChat-Hub-*-win-x64.exe
+          path: ${{ steps.windows_install_smoke.outputs.diagnostics_directory }}/**
+      - name: Upload failed Windows NSIS installer
+        if: failure() && steps.windows_install_smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-windows-nsis-installer
+          if-no-files-found: warn
+          retention-days: 7
+          path: dist/CrossChat-Hub-*-win-x64.exe
       - name: Independent MSI clean installation, launch, relaunch and removal
         if: matrix.platform == 'win'
         shell: pwsh

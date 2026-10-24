@@ -1,8 +1,22 @@
 # Developer CI only: installs and removes a build on a disposable Windows runner.
 # Never offer this script as an end-user installation or repair step.
 $ErrorActionPreference = 'Stop'
-$diagnosticRoot = Join-Path $env:RUNNER_TEMP 'crosschat-windows-install-smoke'
-New-Item -ItemType Directory -Path $diagnosticRoot -Force | Out-Null
+$diagnosticRoot = $null
+foreach ($basePath in @($env:RUNNER_TEMP, [System.IO.Path]::GetTempPath()) | Where-Object { $_ } | Select-Object -Unique) {
+    try {
+        $candidate = Join-Path $basePath 'crosschat-windows-install-smoke'
+        New-Item -ItemType Directory -Path $candidate -Force -ErrorAction Stop | Out-Null
+        $diagnosticRoot = $candidate
+        break
+    } catch {
+        Write-Warning "Installer diagnostics directory unavailable at '$basePath'; trying fallback."
+    }
+}
+if (-not $diagnosticRoot) { Write-Warning 'Installer diagnostics are unavailable; continuing the smoke test without captured output.' }
+if ($diagnosticRoot -and $env:GITHUB_OUTPUT) {
+    try { Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "diagnostics_directory=$diagnosticRoot" -ErrorAction Stop }
+    catch { Write-Warning 'Could not publish the installer diagnostics directory to the workflow.' }
+}
 $setupAttempts = [System.Collections.Generic.List[object]]::new()
 $scriptStartedAt = (Get-Date).ToUniversalTime()
 $script:lastSetupStartedAt = $null
@@ -12,16 +26,18 @@ $appPath = Join-Path $env:LOCALAPPDATA 'Programs\CrossChat Hub\CrossChat Hub.exe
 if (Test-Path -LiteralPath $appPath) { throw 'This test requires a clean disposable Windows runner' }
 
 function Save-SetupAttempts {
+    if (-not $diagnosticRoot) { return }
     $setupAttempts | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $diagnosticRoot 'setup-attempts.json') -Encoding utf8
 }
 
 function Invoke-Setup {
     $attemptNumber = $setupAttempts.Count + 1
-    $stdoutPath = Join-Path $diagnosticRoot "setup-$attemptNumber.stdout.txt"
-    $stderrPath = Join-Path $diagnosticRoot "setup-$attemptNumber.stderr.txt"
+    $stdoutPath = if ($diagnosticRoot) { Join-Path $diagnosticRoot "setup-$attemptNumber.stdout.txt" } else { $null }
+    $stderrPath = if ($diagnosticRoot) { Join-Path $diagnosticRoot "setup-$attemptNumber.stderr.txt" } else { $null }
     $startedAt = (Get-Date).ToUniversalTime()
     $script:lastSetupStartedAt = $startedAt
-    $installerHash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash
+    $installerHash = $null
+    try { $installerHash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256 -ErrorAction Stop).Hash } catch { Write-Warning 'Could not hash the NSIS installer for diagnostics.' }
     $attempt = [ordered]@{
         path = $installer.FullName
         sha256 = $installerHash
@@ -34,51 +50,93 @@ function Invoke-Setup {
     }
     $setupAttempts.Add($attempt)
     try {
-        $setup = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -PassThru -Wait `
-            -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        $startParameters = @{
+            FilePath = $installer.FullName
+            ArgumentList = '/S'
+            PassThru = $true
+            Wait = $true
+        }
+        if ($diagnosticRoot) {
+            $startParameters.RedirectStandardOutput = $stdoutPath
+            $startParameters.RedirectStandardError = $stderrPath
+        }
+        $setup = Start-Process @startParameters
         $attempt.exitCode = $setup.ExitCode
     } catch {
         $attempt.launchError = $_.Exception.Message
         throw
     } finally {
         $attempt.endedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
-        Save-SetupAttempts
+        try { Save-SetupAttempts } catch { Write-Warning 'Could not save installer attempt metadata.' }
     }
     if ($setup.ExitCode -ne 0) { throw "Silent installation failed with code $($setup.ExitCode)" }
     if (-not (Test-Path -LiteralPath $appPath)) { throw "Installed EXE not found: $appPath" }
 }
 
 function Save-FailureDiagnostics {
+    if (-not $diagnosticRoot) { Write-Warning 'No diagnostics directory is available.'; return }
     $failedAt = (Get-Date).ToUniversalTime()
     $eventStart = if ($script:lastSetupStartedAt) { $script:lastSetupStartedAt.AddSeconds(-2) } else { $scriptStartedAt }
     $events = @()
+    $knownPaths = @($installer.FullName, $appPath) | Where-Object { $_ }
+    $knownNames = @($knownPaths | ForEach-Object { [System.IO.Path]::GetFileName($_) })
+    $allowedEventFields = @(
+        'FaultingApplicationName', 'FaultingApplicationPath', 'ApplicationName', 'ApplicationPath',
+        'AppName', 'AppPath', 'FaultingModuleName', 'FaultingModulePath', 'ExceptionCode',
+        'FaultingOffset', 'ProcessId', 'ReportId'
+    )
+    $eventBytesTotal = 0
     try {
         $events = @(Get-WinEvent -FilterHashtable @{
             LogName = 'Application'
-            Id = @(1000, 1001, 1026)
+            Id = @(1000, 1001)
             StartTime = $eventStart
             EndTime = $failedAt.AddSeconds(2)
-        } -ErrorAction Stop | Select-Object -Last 15 | ForEach-Object {
+        } -ErrorAction Stop | Select-Object -Last 50 | ForEach-Object {
             $event = $_
             $eventData = @{}
             try {
                 [xml]$xml = $event.ToXml()
                 foreach ($item in $xml.Event.EventData.Data) {
-                    if ($item.Name) { $eventData[[string]$item.Name] = [string]$item.InnerText }
+                    $field = [string]$item.Name
+                    if ($field -and $field -in $allowedEventFields -and $eventData.Count -lt 12) {
+                        $value = [string]$item.InnerText
+                        if ($value.Length -gt 256) { $value = $value.Substring(0, 256) }
+                        $eventData[$field] = $value
+                    }
                 }
             } catch { }
-            $message = [string]$event.Message
-            if ($message.Length -gt 3000) { $message = $message.Substring(0, 3000) }
-            [pscustomobject]@{
+            $processIdentityFields = @('FaultingApplicationName', 'FaultingApplicationPath', 'ApplicationName', 'ApplicationPath', 'AppName', 'AppPath')
+            $identityValues = @($processIdentityFields | ForEach-Object { $eventData[$_] } | Where-Object { $_ })
+            $matchesKnownProcess = $false
+            foreach ($identity in $identityValues) {
+                if ($identity -in $knownPaths -or ([System.IO.Path]::GetFileName($identity) -in $knownNames)) {
+                    $matchesKnownProcess = $true
+                    break
+                }
+            }
+            if (-not $matchesKnownProcess -or $eventBytesTotal -ge 8192) { return }
+            $providerName = [string]$event.ProviderName
+            if ($providerName.Length -gt 128) { $providerName = $providerName.Substring(0, 128) }
+            $record = [ordered]@{
                 timeUtc = $event.TimeCreated.ToUniversalTime().ToString('o')
-                provider = $event.ProviderName
-                id = $event.Id
+                provider = $providerName
+                id = [int]$event.Id
                 eventData = $eventData
-                message = $message
+            }
+            $recordText = $record | ConvertTo-Json -Compress -Depth 4
+            $recordBytes = [System.Text.Encoding]::UTF8.GetByteCount($recordText)
+            if ($eventBytesTotal + $recordBytes -gt 8192) { return }
+            $eventBytesTotal += $recordBytes
+            [pscustomobject]@{
+                timeUtc = $record.timeUtc
+                provider = $record.provider
+                id = $record.id
+                eventData = $record.eventData
             }
         })
     } catch {
-        $events = @([pscustomobject]@{ queryError = $_.Exception.Message })
+        $events = @()
     }
 
     $diagnostics = [ordered]@{
@@ -88,6 +146,10 @@ function Save-FailureDiagnostics {
     }
     $diagnostics | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $diagnosticRoot 'failure-diagnostics.json') -Encoding utf8
     Write-Output "Failure diagnostics saved to $diagnosticRoot"
+}
+
+function Save-FailureDiagnosticsBestEffort {
+    try { Save-FailureDiagnostics } catch { Write-Warning 'Could not save installer failure diagnostics.' }
 }
 function Start-TestWindow {
     # This is the foreground application under test, not a background helper.
@@ -137,7 +199,7 @@ try {
     if ($remaining) { throw 'Installed app process remains after uninstall' }
     Write-Output 'PASS: uninstall while running; executable and processes removed'
 } catch {
-    try { Save-FailureDiagnostics } catch { Write-Warning "Could not save installer failure diagnostics: $($_.Exception.Message)" }
+    Save-FailureDiagnosticsBestEffort
     throw
 } finally {
     if ($running -and -not $running.HasExited) { Stop-Process -Id $running.Id -Force }
