@@ -11,6 +11,8 @@ const { createWorkspaceState } = require('./workspace-state.cjs');
 const { createForwardingLedger } = require('./forwarding-ledger.cjs');
 const { registerForwardingIpc } = require('./forwarding-ipc.cjs');
 const { createSlackDestinationSnapshots } = require('./slack-destination.cjs');
+const { createSlackAccountService } = require('./slack-account.cjs');
+const slackAppConfig = require('./slack-app-config.json');
 const { createLineBinding } = require('./line-binding.cjs');
 const { createLineWitnessClient } = require('./line-witness-client.cjs');
 const { createSelectionArming } = require('./selection-arming.cjs');
@@ -37,6 +39,7 @@ const activeDownloads = new Map();
 let externalPromptPending = false;
 let closing = false;
 let cancelSelectionArm = () => {};
+let slackAccount = null;
 const workspaceState = createWorkspaceState(path.join(app.getPath('userData'), 'workspace-state'));
 
 function rememberWorkspace(contents, service) {
@@ -278,6 +281,7 @@ function attachHotkeys(contents) {
 const quitSafely = createShutdown({
   prepare: () => {
     closing = true;
+    slackAccount?.close();
     cancelSelectionArm();
     brokerStudy?.beginShutdown();
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
@@ -333,6 +337,20 @@ if (singleInstance) {
     const nativePaths = nativeHelperPaths({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() });
     const smokeHooks = process.env.CROSSCHAT_PRODUCT_SMOKE === '1' && path.basename(process.argv[1] ?? '') === 'desktop-smoke.cjs'
       ? globalThis[Symbol.for('crosschat.productSmokeHooks')] : null;
+    const { createSlackPkce } = await import('./slack-pkce.mjs');
+    const { createSlackUserApi } = await import('./slack-user-api.mjs');
+    const pkce = smokeHooks?.slackAccount ? smokeHooks.slackAccount.pkce : createSlackPkce({
+      clientId: slackAppConfig.clientId,
+      registeredLoopbackRedirectUri: slackAppConfig.registeredLoopbackRedirectUri,
+    });
+    const slackUserApi = smokeHooks?.slackAccount ? smokeHooks.slackAccount.userApi : createSlackUserApi();
+    slackAccount = createSlackAccountService({
+      pkce, userApi: slackUserApi,
+      safeStorage: smokeHooks?.slackAccount?.safeStorage ?? require('electron').safeStorage,
+      filePath: path.join(app.getPath('userData'), 'slack-user-account.enc'),
+    });
+    await slackAccount.reload();
+    if (closing) slackAccount.close();
     const lineWitness = process.platform === 'win32' ? createLineWitnessClient({
       binaryPath: nativePaths.lineWitness,
     }) : null;
@@ -360,6 +378,29 @@ if (singleInstance) {
       onResult: result => { if (!closing && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('crosschat:selection-observed', result); },
     });
     cancelSelectionArm = () => selectionArming.close();
+    ipcMain.handle('crosschat:slack-account-status', event => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      return slackAccount.getStatus();
+    });
+    ipcMain.handle('crosschat:slack-account-reload', async event => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      await slackAccount.reload(); return slackAccount.getStatus();
+    });
+    ipcMain.handle('crosschat:slack-account-connect', async event => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      if (brokerStudy && !smokeHooks?.slackAccount) return { state: 'unavailable', detail: 'isolated-smoke' };
+      await slackAccount.connect(url => smokeHooks?.slackAccount?.openExternal
+        ? smokeHooks.slackAccount.openExternal(url) : shell.openExternal(url));
+      return slackAccount.getStatus();
+    });
+    ipcMain.handle('crosschat:slack-account-cancel', event => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      return slackAccount.cancel();
+    });
+    ipcMain.handle('crosschat:slack-account-disconnect', async event => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      return slackAccount.disconnect();
+    });
     registerForwardingIpc(ipcMain, () => mainWindow, pathToFileURL(path.join(__dirname, 'shell.html')).href, drafts, lineBinding, selectionArming, slackDestinationSnapshots);
     ipcMain.handle('crosschat:tab-switch', (event, id) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');

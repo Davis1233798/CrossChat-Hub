@@ -6,6 +6,11 @@ contextBridge.exposeInMainWorld('crosschatDesktop', Object.freeze({
   clearProfile: id => ipcRenderer.invoke('crosschat:profile-clear', id),
   openInBrowser: id => ipcRenderer.invoke('crosschat:open-browser', id),
   openLineOfficial: kind => ipcRenderer.invoke('crosschat:line-official', kind),
+  getSlackAccountStatus: () => ipcRenderer.invoke('crosschat:slack-account-status'),
+  reloadSlackAccountStatus: () => ipcRenderer.invoke('crosschat:slack-account-reload'),
+  connectSlackAccount: () => ipcRenderer.invoke('crosschat:slack-account-connect'),
+  cancelSlackAccountConnect: () => ipcRenderer.invoke('crosschat:slack-account-cancel'),
+  disconnectSlackAccount: () => ipcRenderer.invoke('crosschat:slack-account-disconnect'),
   onTabStatus: callback => {
     ipcRenderer.on('crosschat:tab-status', (_event, data) => callback(data));
   },

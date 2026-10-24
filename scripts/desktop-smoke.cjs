@@ -9,6 +9,12 @@ process.env.CROSSCHAT_PRODUCT_SMOKE = '1';
 let simulatedHotkey = null, triggerDuringRegistration = false, observedText = '隔離產品 smoke 選取文字', observationStatus = 'observed';
 let registeredAccelerator = null, unregisterCount = 0, observationCount = 0, registerCount = 0;
 globalThis[Symbol.for('crosschat.productSmokeHooks')] = {
+  slackAccount: {
+    pkce: { isConfigured: true, async begin() { return { status: 'ready', authorizeUrl: 'https://slack.com/oauth/v2/authorize?smoke=1', completion: Promise.resolve({ status: 'authorized', token: { accessToken: 'isolated-fake-token', expiresIn: 3600 } }), cancel() {} }; } },
+    userApi: { async verifyAccount(token) { if (token !== 'isolated-fake-token') throw new Error('unexpected smoke token'); return { status: 'verified', account: { platform: 'slack', accountKind: 'personal', accountId: 'slack:T-SMOKE:U-SMOKE', teamId: 'T-SMOKE', userId: 'U-SMOKE' } }; } },
+    safeStorage: { async isAsyncEncryptionAvailable() { return true; }, async encryptStringAsync(value) { return Buffer.from(Buffer.from(value, 'utf8').toString('base64'), 'ascii'); }, async decryptStringAsync(value) { return { result: Buffer.from(value.toString('ascii'), 'base64').toString('utf8'), shouldReEncrypt: false }; } },
+    async openExternal(url) { if (!url.startsWith('https://slack.com/oauth/v2/authorize?')) throw new Error('unexpected smoke URL'); },
+  },
   registerShortcut(accelerator, callback) {
     registerCount++; registeredAccelerator = accelerator; simulatedHotkey = callback;
     if (triggerDuringRegistration) { triggerDuringRegistration = false; callback(); }
@@ -44,6 +50,13 @@ app.whenReady().then(async () => {
   })()`);
   if (composer.status !== 'unsupported' || composer.member !== '小明' || composer.attempt !== 'unsupported' ||
       !composer.privatePlan || !composer.disabled || !composer.focused || composer.bottom > composer.height) throw new Error('Composer IPC/private unsupported state failed');
+  const fakeSlack = await window.webContents.executeJavaScript(`(async () => {
+    const result = await window.crosschatDesktop.connectSlackAccount();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const status = await window.crosschatDesktop.getSlackAccountStatus();
+    return {initial:result.state,status:status.state,accountId:status.account?.accountId,hasToken:Object.hasOwn(status,'accessToken')};
+  })()`);
+  if (fakeSlack.initial !== 'connecting' || fakeSlack.status !== 'connected' || fakeSlack.accountId !== 'slack:T-SMOKE:U-SMOKE' || fakeSlack.hasToken) throw new Error('Isolated fake Slack account IPC failed');
   const selection = await window.webContents.executeJavaScript(`(async () => {
     const api=window.crosschatDesktop;
     const capture=await api.captureSelection({text:'隔離測試單則文字',platform:'line',chatName:'合成來源'});

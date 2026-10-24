@@ -25,7 +25,51 @@
     connecting.hidden = id === 'line';
     status.textContent = id === 'line' ? 'LINE：官方個人聊天客戶端無法可靠嵌入 Electron' : `${id} · 官方網頁版 · 登入會話保留在此電腦`;
     if (notify) window.crosschatDesktop.switchTab(id).catch(() => { status.textContent = '分頁載入失敗'; });
+    document.getElementById('slack-account-controls').hidden = id !== 'slack';
   }
+  const slackControls = document.getElementById('slack-account-controls');
+  const slackState = document.getElementById('slack-account-state');
+  const slackConnect = document.getElementById('slack-account-connect');
+  const slackCancel = document.getElementById('slack-account-cancel');
+  const slackDisconnect = document.getElementById('slack-account-disconnect');
+  const slackReload = document.getElementById('slack-account-reload');
+  const slackLabels = {
+    unavailable: 'Slack OAuth 尚未由維護者設定', 'signed-out': '尚未連結 Slack 帳號', connecting: '等待 Slack 官方授權…',
+    verifying: '正在驗證授權帳號…', connected: '已驗證 Slack 個人帳號', 'reauthorization-required': '授權已過期或無效，請重新連結',
+    'verification-unavailable': '目前無法驗證 Slack 身分', 'secure-storage-unavailable': '此裝置無法安全保存授權',
+    'storage-unavailable': '無法安全讀取授權資料', 'disconnect-incomplete': '解除帳號未完成，請重試', 'connect-failed': 'Slack 登入未完成',
+  };
+  function renderSlackAccount(value) {
+    slackState.textContent = value?.state === 'connected' && value.account
+      ? `已驗證：${value.account.teamId} · ${value.account.userId}`
+      : slackLabels[value?.state] || 'Slack 帳號狀態未知';
+    slackConnect.hidden = value?.state === 'connected' || value?.state === 'connecting';
+    slackConnect.disabled = value?.state === 'secure-storage-unavailable' || value?.state === 'storage-unavailable' || value?.state === 'disconnect-incomplete';
+    slackCancel.hidden = value?.state !== 'connecting';
+    slackDisconnect.hidden = value?.state !== 'connected';
+  }
+  async function reloadSlackAccount() {
+    slackReload.disabled = true;
+    try { renderSlackAccount(await window.crosschatDesktop.reloadSlackAccountStatus()); }
+    catch { renderSlackAccount({ state: 'storage-unavailable' }); }
+    finally { slackReload.disabled = false; }
+  }
+  slackConnect.addEventListener('click', async () => {
+    slackConnect.disabled = true;
+    try { renderSlackAccount(await window.crosschatDesktop.connectSlackAccount()); }
+    catch { renderSlackAccount({ state: 'connect-failed' }); }
+    finally { slackConnect.disabled = false; }
+  });
+  slackCancel.addEventListener('click', async () => renderSlackAccount(await window.crosschatDesktop.cancelSlackAccountConnect().catch(() => ({ state: 'connect-failed' }))));
+  slackDisconnect.addEventListener('click', async () => renderSlackAccount(await window.crosschatDesktop.disconnectSlackAccount().catch(() => ({ state: 'disconnect-incomplete' }))));
+  slackReload.addEventListener('click', reloadSlackAccount);
+  slackControls.hidden = true;
+  void reloadSlackAccount();
+  const slackStatusTimer = setInterval(async () => {
+    if (document.visibilityState !== 'visible') return;
+    try { renderSlackAccount(await window.crosschatDesktop.getSlackAccountStatus()); } catch {}
+  }, 1000);
+  window.addEventListener('beforeunload', () => clearInterval(slackStatusTimer), { once: true });
   tabs.forEach(tab => tab.addEventListener('click', () => select(tab.dataset.tab)));
   document.getElementById('reload').addEventListener('click', () => window.crosschatDesktop.reloadTab(selected));
   clearProfile.addEventListener('click', async () => {

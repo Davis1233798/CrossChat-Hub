@@ -23,7 +23,15 @@
     <button type="button" id="clear-profile" title="清除此平台在本機的登入及網站資料">清除登入</button>
     <button type="button" id="quit" title="完全結束程式" aria-label="結束程式">結束</button>
   </nav>
-  <div class="status"><span id="indicator" aria-hidden="true"></span><span id="status">選擇平台登入；登入資料只留在此裝置，各平台帳號彼此隔離</span></div>
+  <div class="status"><span id="indicator" aria-hidden="true"></span><span id="status">選擇平台登入；登入資料只留在此裝置，各平台帳號彼此隔離</span>
+    <div id="slack-account-controls" class="slack-account-controls" hidden>
+    <span id="slack-account-state" role="status">Slack 帳號狀態載入中</span>
+    <button type="button" id="slack-account-connect">連結 Slack 帳號</button>
+    <button type="button" id="slack-account-cancel" class="secondary" hidden>取消登入</button>
+    <button type="button" id="slack-account-disconnect" class="secondary" hidden>解除 Slack 帳號</button>
+    <button type="button" id="slack-account-reload" class="secondary">重新檢查</button>
+    </div>
+  </div>
 </div>
 <main id="native-content" aria-live="polite">
   <section id="line" class="native-panel" hidden>
