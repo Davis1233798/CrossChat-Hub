@@ -1,0 +1,17 @@
+{
+  "display_information": {
+    "name": "CrossChat Hub"
+  },
+  "oauth_config": {
+    "redirect_urls": [
+      "http://localhost:43210/slack/oauth/callback"
+    ],
+    "scopes": {
+      "bot": [],
+      "user": [
+        "chat:write"
+      ]
+    },
+    "pkce_enabled": true
+  }
+}

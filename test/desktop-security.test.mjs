@@ -31,13 +31,16 @@ test('remote views remain sandboxed and cannot receive native APIs', () => {
   assert.match(code, /setSaveDialogOptions/);
   assert.doesNotMatch(code, /executeJavaScript\(/);
 });
-test('no scripts needed: NSIS upgrade closes old executable before replacing files', () => {
+test('NSIS requests normal close and blocks replacement if a process remains', () => {
   const pkg = JSON.parse(read('../package.json'));
   const installer = read('../build/windows-installer.nsh');
   assert.equal(pkg.build.nsis.include, 'build/windows-installer.nsh');
-  assert.match(installer, /customInit/);
-  assert.match(installer, /taskkill\.exe/);
-  assert.match(installer, /CrossChat Hub\.exe/);
+  assert.match(installer, /customCheckAppRunning/);
+  assert.match(installer, /SendMessage.*0x0010/);
+  assert.match(installer, /ExecWait/);
+  assert.match(installer, /tasklist\.exe/);
+  assert.match(installer, /SetErrorLevel 2/);
+  assert.doesNotMatch(installer, /taskkill\.exe|nsExec::Exec/);
 });
 test('tabs persist last selection, show message counts, and expose real website fallback', () => {
   const shell = read('../desktop/shell.html');

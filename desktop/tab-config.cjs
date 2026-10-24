@@ -7,7 +7,7 @@ const SERVICES = Object.freeze([
   Object.freeze({ id: 'discord', title: 'Discord', url: 'https://discord.com/app', partition: 'persist:crosschat-discord', kind: 'web' }),
   Object.freeze({ id: 'slack', title: 'Slack', url: 'https://slack.com/signin', partition: 'persist:crosschat-slack', kind: 'web' }),
   Object.freeze({ id: 'whatsapp', title: 'WhatsApp', url: 'https://web.whatsapp.com/', partition: 'persist:crosschat-whatsapp', kind: 'web' }),
-  Object.freeze({ id: 'line', title: 'LINE', url: null, partition: null, kind: 'unsupported-extension' }),
+  Object.freeze({ id: 'line', title: 'LINE', url: null, partition: null, kind: process.platform === 'win32' ? 'native-line-experimental' : 'native-line-unavailable' }),
 ]);
 const SERVICE_IDS = Object.freeze(SERVICES.map(s => s.id));
 const LINE_DOWNLOADS = Object.freeze({

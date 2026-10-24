@@ -3,13 +3,19 @@
   const line = document.getElementById('line');
   const connecting = document.getElementById('connecting');
   const status = document.getElementById('status');
+  const profileState = document.getElementById('profile-state');
+  const clearProfile = document.getElementById('clear-profile');
+  const clearingIds = new Set();
   const saved = window.localStorage.getItem('crosschat-last-tab');
   let selected = tabs.some(t => t.dataset.tab === saved) ? saved : 'telegram';
-  function select(id) {
+  function select(id, notify = true) {
     if (!tabs.some(tab => tab.dataset.tab === id)) return;
     selected = id;
     window.localStorage.setItem('crosschat-last-tab', id);
     document.getElementById('open-browser').hidden = id === 'line';
+    clearProfile.hidden = id === 'line';
+    clearProfile.disabled = clearingIds.has(id);
+    profileState.hidden = true;
     for (const tab of tabs) {
       const active = tab.dataset.tab === id;
       tab.classList.toggle('selected', active);
@@ -17,15 +23,159 @@
     }
     line.hidden = id !== 'line';
     connecting.hidden = id === 'line';
-    status.textContent = id === 'line' ? 'LINE：官方個人聊天客戶端無法可靠嵌入 Electron' : `${id} · 官方網頁版 · 登入會話保留在此電腦`;
-    window.crosschatDesktop.switchTab(id).catch(() => { status.textContent = '分頁載入失敗'; });
+    status.textContent = id === 'line' ? 'LINE：Windows 原生視窗實驗功能，需明確綁定並啟用' : `${id} · 官方網頁版 · 登入會話保留在此電腦`;
+    if (notify) window.crosschatDesktop.switchTab(id).catch(() => { status.textContent = '分頁載入失敗'; });
+    document.getElementById('slack-account-controls').hidden = id !== 'slack';
+    slackDestinationPanel.hidden = id !== 'slack';
   }
+  const slackControls = document.getElementById('slack-account-controls');
+  const slackState = document.getElementById('slack-account-state');
+  const slackConnect = document.getElementById('slack-account-connect');
+  const slackCancel = document.getElementById('slack-account-cancel');
+  const slackDisconnect = document.getElementById('slack-account-disconnect');
+  const slackReload = document.getElementById('slack-account-reload');
+  const slackLabels = {
+    unavailable: 'Slack OAuth 尚未由維護者設定', 'signed-out': '尚未連結 Slack 帳號', connecting: '等待 Slack 官方授權…',
+    verifying: '正在驗證授權帳號…', connected: '已驗證 Slack 個人帳號', 'reauthorization-required': '授權已過期或無效，請重新連結',
+    'verification-unavailable': '目前無法驗證 Slack 身分', 'secure-storage-unavailable': '此裝置無法安全保存授權',
+    'storage-unavailable': '無法安全讀取授權資料', 'disconnect-incomplete': '解除尚未完成，重啟可能重新載入，請重試', 'connect-failed': 'Slack 登入未完成',
+  };
+  function renderSlackAccount(value) {
+    slackState.textContent = value?.state === 'connected' && value.account
+      ? `已驗證：${value.account.teamId} · ${value.account.userId}`
+      : slackLabels[value?.state] || 'Slack 帳號狀態未知';
+    slackConnect.hidden = value?.state === 'connected' || value?.state === 'connecting';
+    slackConnect.disabled = value?.state === 'secure-storage-unavailable' || value?.state === 'storage-unavailable' || value?.state === 'disconnect-incomplete';
+    slackCancel.hidden = value?.state !== 'connecting';
+    slackDisconnect.hidden = value?.state !== 'connected' && value?.state !== 'disconnect-incomplete';
+    slackDisconnect.textContent = value?.state === 'disconnect-incomplete' ? '重試解除' : '解除 Slack 帳號';
+  }
+  async function reloadSlackAccount() {
+    slackReload.disabled = true;
+    try { renderSlackAccount(await window.crosschatDesktop.reloadSlackAccountStatus()); }
+    catch { renderSlackAccount({ state: 'storage-unavailable' }); }
+    finally { slackReload.disabled = false; }
+  }
+  slackConnect.addEventListener('click', async () => {
+    slackConnect.disabled = true;
+    try { renderSlackAccount(await window.crosschatDesktop.connectSlackAccount()); }
+    catch { renderSlackAccount({ state: 'connect-failed' }); }
+    finally { slackConnect.disabled = false; }
+  });
+  slackCancel.addEventListener('click', async () => renderSlackAccount(await window.crosschatDesktop.cancelSlackAccountConnect().catch(() => ({ state: 'connect-failed' }))));
+  slackDisconnect.addEventListener('click', async () => renderSlackAccount(await window.crosschatDesktop.disconnectSlackAccount().catch(() => ({ state: 'disconnect-incomplete' }))));
+  slackReload.addEventListener('click', reloadSlackAccount);
+  slackControls.hidden = true;
+  void reloadSlackAccount();
+  const slackStatusTimer = setInterval(async () => {
+    if (document.visibilityState !== 'visible') return;
+    try { renderSlackAccount(await window.crosschatDesktop.getSlackAccountStatus()); } catch {}
+  }, 1000);
+  window.addEventListener('beforeunload', () => clearInterval(slackStatusTimer), { once: true });
   tabs.forEach(tab => tab.addEventListener('click', () => select(tab.dataset.tab)));
   document.getElementById('reload').addEventListener('click', () => window.crosschatDesktop.reloadTab(selected));
+  clearProfile.addEventListener('click', async () => {
+    const id = selected;
+    if (clearingIds.has(id)) return;
+    clearingIds.add(id);
+    clearProfile.disabled = true;
+    try {
+      const result = await window.crosschatDesktop.clearProfile(id);
+      if (selected === id && result.state === 'cleared') status.textContent = `${id} · 已清除本機登入資料，請在官方頁面重新登入`;
+    } catch {
+      if (selected === id) status.textContent = `${id} · 無法清除本機登入資料，請稍後重試`;
+    } finally {
+      clearingIds.delete(id);
+      clearProfile.disabled = clearingIds.has(selected);
+    }
+  });
   document.getElementById('open-browser').addEventListener('click', () => window.crosschatDesktop.openInBrowser(selected));
   document.getElementById('quit').addEventListener('click', () => window.crosschatDesktop.quit());
   document.querySelectorAll('[data-line-link]').forEach(button => button.addEventListener('click', () => window.crosschatDesktop.openLineOfficial(button.dataset.lineLink)));
+  const lineCandidateList = document.getElementById('line-candidate-list');
+  const lineBindingStatus = document.getElementById('line-binding-status');
+  const lineUnbind = document.getElementById('line-unbind');
+  const lineNativeStatus = document.getElementById('line-native-status');
+  const lineRestore = document.getElementById('line-restore');
+  const lineEnable = document.getElementById('line-enable');
+  let lineNativeBusy = false;
+  lineEnable.addEventListener('click', async () => {
+    if (lineNativeBusy) return;
+    lineNativeBusy = true; lineEnable.disabled = true;
+    lineNativeStatus.textContent = '正在驗證已綁定的 LINE 視窗並準備附掛…';
+    try {
+      const result = await window.crosschatDesktop.enableNativeLine();
+      lineNativeStatus.textContent = result.state === 'enabled' ? 'LINE 已啟用。切換其他平台時會隱藏，返回 LINE 時會重新顯示。' : result.detail || '目前無法啟用 LINE。';
+      lineRestore.hidden = ['unbound', 'unavailable', 'inactive'].includes(result.state);
+    } catch { lineNativeStatus.textContent = '啟用未完成；請確認綁定仍有效後重試。'; }
+    finally { lineNativeBusy = false; lineEnable.disabled = false; }
+  });
+  lineRestore.addEventListener('click', async () => {
+    if (lineNativeBusy) return;
+    lineNativeBusy = true; lineRestore.disabled = true;
+    lineNativeStatus.textContent = '正在還原 LINE 視窗並確認原始位置…';
+    try {
+      const result = await window.crosschatDesktop.restoreNativeLine();
+      if (result.restored) { lineNativeStatus.textContent = 'LINE 已還原並確認。'; lineRestore.hidden = true; lineEnable.hidden = false; }
+      else lineNativeStatus.textContent = result.detail || '尚未確認還原；請保持視窗開啟並重試。';
+    } catch { lineNativeStatus.textContent = '尚未確認還原；請保持視窗開啟並重試。'; }
+    finally { lineNativeBusy = false; lineRestore.disabled = false; }
+  });
+  let lineBindingBusy = false;
+  function clearLineCandidates() { lineCandidateList.replaceChildren(); }
+  document.getElementById('line-candidates-refresh').addEventListener('click', async () => {
+    if (lineBindingBusy) return;
+    lineBindingBusy = true; clearLineCandidates(); lineBindingStatus.textContent = '正在檢查 LINE 主視窗中繼資料…';
+    try {
+      const result = await window.crosschatDesktop.listLineCandidates();
+      lineUnbind.hidden = !result.bound;
+      if (result.status === 'stale') { lineBindingStatus.textContent = '候選清單已更新，請重新列出 LINE 視窗。'; return; }
+      if (result.status !== 'available') { lineBindingStatus.textContent = '目前無法確認 LINE 主視窗（Windows 開發版 helper 或官方簽章驗證不可用）。'; return; }
+      lineBindingStatus.textContent = result.candidates.length ? '請逐一確認視窗；程式不會替你選擇。' : '未找到符合條件的官方 LINE 主視窗。';
+      for (const candidate of result.candidates) {
+        const row = document.createElement('li');
+        const button = document.createElement('button'); button.type = 'button';
+        button.textContent = `確認：第 ${candidate.sequence} 個視窗是我已登入的聊天主視窗，並綁定`;
+        button.addEventListener('click', async () => {
+          if (lineBindingBusy) return;
+          lineBindingBusy = true; button.disabled = true;
+          try {
+            const bound = await window.crosschatDesktop.bindLineCandidate({ candidateId: candidate.candidateId, confirmed: true });
+            clearLineCandidates();
+            if (bound.status === 'bound') { lineBindingStatus.textContent = '已綁定你確認的 LINE 主視窗。每次觀察前都會重新驗證。'; lineUnbind.hidden = false; }
+            else { lineBindingStatus.textContent = '候選視窗已失效，請重新列出並確認。'; lineUnbind.hidden = true; }
+          } catch { lineBindingStatus.textContent = '無法綁定此視窗，請重新列出並確認。'; }
+          finally { lineBindingBusy = false; }
+        });
+        row.append(button); lineCandidateList.append(row);
+      }
+    } catch { lineBindingStatus.textContent = '無法列出 LINE 主視窗。'; }
+    finally { lineBindingBusy = false; }
+  });
+  lineUnbind.addEventListener('click', async () => {
+    if (lineBindingBusy) return;
+    lineBindingBusy = true;
+    try { await window.crosschatDesktop.unbindLine(); lineUnbind.hidden = true; clearLineCandidates(); lineBindingStatus.textContent = '已解除 LINE 主視窗綁定。'; }
+    catch { lineBindingStatus.textContent = '無法解除綁定。'; }
+    finally { lineBindingBusy = false; }
+  });
   window.crosschatDesktop.onTabStatus(({ id, state, detail }) => {
+    if (state === 'selected') { select(id, false); return; }
+    if (id === 'line') {
+      if (state === 'native-enabled') {
+        lineNativeStatus.textContent = detail || 'LINE 已啟用。切換其他平台時會隱藏，返回 LINE 時會重新顯示。';
+        lineEnable.hidden = true; lineRestore.hidden = false;
+      } else if (state === 'restore-error' || state === 'error') {
+        lineNativeStatus.textContent = detail || 'LINE 尚未確認還原；請保持視窗開啟並重試。';
+        lineEnable.hidden = true; lineRestore.hidden = false;
+      } else if (state === 'attach-error' || state === 'host-attached') {
+        if (detail) lineNativeStatus.textContent = detail;
+        lineEnable.hidden = false; lineRestore.hidden = false;
+      } else if (state === 'native-ready' || state === 'stopped' || state === 'host-failed-restored') {
+        lineNativeStatus.textContent = detail || '尚未啟用；列出或綁定不會移動 LINE 視窗。';
+        lineEnable.hidden = false; lineRestore.hidden = true;
+      }
+    }
     const tab = tabs.find(t => t.dataset.tab === id);
     if (state === 'title' && tab) {
       const old = tab.querySelector('.unread');
@@ -34,15 +184,246 @@
       return;
     }
     if (id !== selected) return;
+    if (state === 'resetting' || state === 'reset-error') {
+      connecting.hidden = true;
+      profileState.hidden = false;
+      document.getElementById('profile-state-title').textContent = state === 'resetting' ? '正在清除本機登入資料' : '本機資料尚未清除完成';
+      document.getElementById('profile-state-detail').textContent = state === 'resetting' ? '此平台暫停載入，其他平台可以繼續使用。' : '此平台保持暫停，避免網站重新寫入資料。請按「清除登入」重試。';
+    } else if (state === 'cleared' || state === 'loaded' || state === 'loading') {
+      profileState.hidden = true;
+    }
     const labels = {
       loaded: '已載入官方網頁；請在頁面內登入（這不代表已驗證成功）',
       failed: '無法載入網頁。可按「官方網站」在瀏覽器測試登入',
       loading: '正在載入…',
       downloaded: '附件儲存完成',
       'download-error': '附件下載中斷',
+      'external-error': '無法開啟外部網站，請稍後再試',
+      resetting: '正在清除此裝置上的登入資料…',
+      cleared: '已清除本機登入資料，請重新登入',
+      'reset-error': '清除未完成；此平台暫停載入，請重試',
       unsupported: 'LINE 只能使用官方獨立客戶端或 Chrome 擴充功能',
+      'native-ready': '已選取 LINE 分頁；LINE 尚未附掛',
+      'native-enabled': 'LINE 原生視窗已附掛並啟用',
+      'restore-error': 'LINE 尚未確認還原；請保持視窗開啟並重試',
     };
     status.textContent = `${id} · ${labels[state] ?? state}`;
   });
+  const slackDestinationPanel = document.getElementById('slack-destination-preview');
+  const slackDestinationButton = document.getElementById('slack-destination-select');
+  const slackDestinationUseButton = document.getElementById('slack-destination-use');
+  const slackDestinationStatus = document.getElementById('slack-destination-status');
+  let slackDestinationSelection = null;
+  function clearSlackDestinationSelection() {
+    slackDestinationSelection = null;
+    slackDestinationUseButton.disabled = true;
+    slackDestinationStatus.textContent = '目前沒有已記住的 Slack 目的地。只供預覽，不會用於傳送。';
+  }
+  window.crosschatDesktop.onSlackDestinationInvalidated(clearSlackDestinationSelection);
+  slackDestinationButton.addEventListener('click', async () => {
+    if (selected !== 'slack') {
+      slackDestinationStatus.textContent = '請先切到 Slack 分頁並打開目的聊天室；不會讀取聊天內容。';
+      return;
+    }
+    slackDestinationButton.disabled = true;
+    try {
+      const result = await window.crosschatDesktop.selectCurrentSlackDestination();
+      if (result.status !== 'identified') {
+        clearSlackDestinationSelection();
+        slackDestinationStatus.textContent = '目前網址無法確認 Slack 工作區與聊天室 ID；名稱未知。';
+      } else {
+        slackDestinationSelection = result.selectionId;
+        slackDestinationUseButton.disabled = false;
+        slackDestinationStatus.textContent = `候選：工作區 ${result.teamId} · 聊天室 ID ${result.conversationId}；名稱未知。`;
+      }
+    } catch {
+      clearSlackDestinationSelection();
+      slackDestinationStatus.textContent = '無法確認 Slack 目前目的地。未發送。';
+    } finally { slackDestinationButton.disabled = false; }
+  });
+  slackDestinationUseButton.addEventListener('click', () => {
+    if (!slackDestinationSelection) return;
+    const checked = window.crosschatDesktop.validateSlackDestination(slackDestinationSelection);
+    Promise.resolve(checked).then(result => {
+      if (result.status !== 'identified' || result.selectionId !== slackDestinationSelection) { clearSlackDestinationSelection(); return; }
+      if (mode.value === 'selection') routeInput.value = `@slack:${result.conversationId}`;
+      else composeText.value = `@slack:${result.conversationId} `;
+      changed();
+      slackDestinationStatus.textContent = '已填入精確 Slack 聊天室 ID；預覽後仍需按「傳送」。';
+    }).catch(clearSlackDestinationSelection);
+  });
   select(selected);
+  const composeText = document.getElementById('compose-text');
+  const composeStatus = document.getElementById('compose-status');
+  const previewButton = document.getElementById('compose-preview');
+  const mode = document.getElementById('compose-mode');
+  const sourcePlatform = document.getElementById('source-platform');
+  const sourceChat = document.getElementById('source-chat');
+  const routeInput = document.getElementById('compose-route');
+  let draft = null, capture = null, editVersion = 0;
+  const selectionArm = document.getElementById('selection-arm');
+  const selectionCancel = document.getElementById('selection-cancel');
+  const selectionHint = document.getElementById('selection-source-hint');
+  let armedSelection = null, armRequestPending = false;
+  function revoke(ref) { if (ref) void window.crosschatDesktop.revokeSelection(ref).catch(() => {}); }
+  function cancelArmedSelection() {
+    const arm = armedSelection; armedSelection = null;
+    selectionArm.hidden = mode.value !== 'selection' || sourcePlatform.value !== 'line';
+    selectionCancel.hidden = true;
+    selectionHint.textContent = '人工貼入，來源未經平台驗證';
+    if (arm) void window.crosschatDesktop.cancelSelectionCapture({ armId: arm.armId }).catch(() => {});
+  }
+  function changed() {
+    editVersion++;
+    cancelArmedSelection();
+    revoke(capture); capture = null; draft = null;
+    composeStatus.textContent = '內容已變更，請重新預覽目的地。尚未發送。';
+  }
+  for (const input of [composeText, sourceChat, routeInput]) input.addEventListener('input', changed);
+  sourcePlatform.addEventListener('change', changed);
+  mode.addEventListener('change', () => {
+    changed();
+    const forwarding = mode.value === 'selection';
+    document.getElementById('compose-source').hidden = !forwarding;
+    document.getElementById('compose-route-row').hidden = !forwarding;
+    slackDestinationPanel.hidden = selected !== 'slack';
+    document.getElementById('compose-text-label').textContent = forwarding ? '貼入要轉發的單則原文' : '跨軟體訊息';
+    document.getElementById('compose-help').textContent = forwarding ? '請自行核對來源及原文；預覽不會發送訊息' : '例如 @line:群組名:人名 要說的話；名稱含空白請用雙引號';
+    composeText.placeholder = forwarding ? '貼入你選擇的單則文字；不會自動讀取聊天記錄' : '@line:群組名 訊息內容';
+    selectionArm.hidden = !forwarding || sourcePlatform.value !== 'line';
+  });
+  sourcePlatform.addEventListener('change', () => {
+    selectionArm.hidden = mode.value !== 'selection' || sourcePlatform.value !== 'line';
+    slackDestinationPanel.hidden = selected !== 'slack';
+  });
+  selectionArm.addEventListener('click', async () => {
+    if (armedSelection || mode.value !== 'selection' || sourcePlatform.value !== 'line' || !sourceChat.value.trim()) {
+      composeStatus.textContent = '請選擇 LINE 並填寫來源聊天室名稱。尚未讀取或發送。'; return;
+    }
+    const requestVersion = editVersion;
+    armRequestPending = true;
+    selectionArm.disabled = true;
+    try {
+      const result = await window.crosschatDesktop.armSelectionCapture({ platform: 'line', chatName: sourceChat.value });
+      if (result.status === 'prepared') {
+        if (requestVersion !== editVersion || mode.value !== 'selection' || sourcePlatform.value !== 'line') {
+          void window.crosschatDesktop.cancelSelectionCapture({ armId: result.armId }).catch(() => {});
+          return;
+        }
+        armedSelection = { armId: result.armId, editVersion };
+        selectionArm.hidden = true; selectionCancel.hidden = false;
+        selectionHint.textContent = '30 秒內切回 LINE，選取單則文字後按 Ctrl+Shift+Alt+S。尚未讀取或發送。';
+        composeStatus.textContent = '等待你在已綁定的 LINE 視窗選取文字並按快捷鍵。';
+        const activated = await window.crosschatDesktop.activateSelectionCapture({ armId: result.armId });
+        if (activated.status !== 'armed' && armedSelection?.armId === result.armId) {
+          cancelArmedSelection();
+          composeStatus.textContent = activated.reason === 'shortcut-unavailable' ? '快捷鍵正在被其他程式使用。請關閉該程式後重試。' : '讀取準備已取消，請重試。';
+        }
+      } else if (result.reason === 'shortcut-unavailable') composeStatus.textContent = '快捷鍵正在被其他程式使用。請關閉該程式後重試。';
+      else if (result.reason === 'line-window-not-bound') composeStatus.textContent = '請先在 LINE 分頁綁定你確認的 LINE 主視窗。';
+      else composeStatus.textContent = '目前無法準備讀取選取文字，請確認來源欄位後重試。';
+    } catch { composeStatus.textContent = '無法準備讀取選取文字。尚未讀取或發送。'; }
+    finally { armRequestPending = false; selectionArm.disabled = false; }
+  });
+  selectionCancel.addEventListener('click', cancelArmedSelection);
+  window.crosschatDesktop.onObservedSelection(result => {
+    const arm = armedSelection;
+    if (!arm || result.armId !== arm.armId || arm.editVersion !== editVersion) return;
+    armedSelection = null; selectionCancel.hidden = true;
+    selectionArm.hidden = mode.value !== 'selection' || sourcePlatform.value !== 'line';
+    if (result.status !== 'captured') {
+      selectionHint.textContent = '讀取失敗；原文欄內容已保留。';
+      composeStatus.textContent = result.status === 'expired' ? '讀取準備已逾時。原文欄未變更。' : '未能讀取單則選取文字。請確認焦點仍在 LINE、僅選取一則文字，然後重試。原文欄未變更。';
+      return;
+    }
+    changed();
+    composeText.value = result.text;
+    const ref = { selectionId: result.selectionId, captureRevision: result.captureRevision };
+    capture = ref;
+    selectionHint.textContent = '來自 LINE 介面選取文字；來源聊天室由你填寫，未經平台驗證。';
+    composeStatus.textContent = '已讀取選取文字。請核對來源與原文，再預覽目的地；未發送。';
+    void window.crosschatDesktop.acknowledgeSelectionCapture({ armId: result.armId, ...ref }).then(ack => {
+      if (ack.status !== 'accepted' && capture === ref) {
+        revoke(ref); capture = null;
+        selectionHint.textContent = '讀取結果已逾時；請重新準備讀取。';
+        composeStatus.textContent = '讀取結果未能保留，請重試。原文欄內容已保留。';
+      }
+    }).catch(() => { if (capture === ref) { revoke(ref); capture = null; } });
+  });
+  previewButton.addEventListener('click', async () => {
+    if (armedSelection || armRequestPending) { editVersion++; cancelArmedSelection(); }
+    const version = editVersion;
+    previewButton.disabled = true;
+    try {
+      let result;
+      if (mode.value === 'selection') {
+        if (!capture) {
+          const saved = await window.crosschatDesktop.captureSelection({ text: composeText.value, platform: sourcePlatform.value, chatName: sourceChat.value });
+          if (saved.status !== 'captured') { composeStatus.textContent = '請填寫來源聊天室並貼入單則文字。未發送。'; return; }
+          const ref = { selectionId: saved.selectionId, captureRevision: saved.captureRevision };
+          if (version !== editVersion) { revoke(ref); return; }
+          capture = ref;
+        }
+        result = await window.crosschatDesktop.prepareSelection({ ...capture, routeText: routeInput.value,
+          ...(slackDestinationSelection ? { slackDestinationSelectionId: slackDestinationSelection } : {}) });
+      } else {
+        const input = { text: composeText.value, ...(slackDestinationSelection ? { slackDestinationSelectionId: slackDestinationSelection } : {}), ...(draft ? { draftId: draft.draftId, revision: draft.revision } : {}) };
+        result = await window.crosschatDesktop.prepareDraft(input);
+      }
+      if (version !== editVersion) return;
+      if (result.draftId) draft = { draftId: result.draftId, revision: result.revision };
+      const p = result.preview;
+      const source = result.source ? `來源：${result.source.platform}「${result.source.chatName}」（${result.source.provenance === 'ui-selected-text-unverified-origin' ? '介面選取，來源未經平台驗證' : '人工確認，未經平台驗證'}） → ` : '';
+      const canSend = result.status === 'prepared' && Boolean(result.draftId);
+      document.getElementById('compose-send').disabled = !canSend;
+      if (p) composeStatus.textContent = `${source}${p.platform}「${p.chatName}」${p.memberName ? ` · 提及「${p.memberName}」` : ''}。${canSend ? 'Slack 純文字已準備；按「傳送」才會送出。' : '尚未發送。'}`;
+      else {
+        if (result.status === 'rejected') draft = null;
+        document.getElementById('compose-send').disabled = true;
+        composeStatus.textContent = mode.value === 'selection' ? '請只填目的地 @平台:聊天室[:人名]，原文由來源欄保留。未發送。' : '無法解析目的地，請使用 @slack:實際聊天室ID 訊息。未發送。';
+      }
+    } catch { composeStatus.textContent = '無法預覽目的地，未發送。'; }
+    finally { previewButton.disabled = false; }
+  });
+  document.getElementById('compose-send').addEventListener('click', async () => {
+    if (!draft) return;
+    const button = document.getElementById('compose-send'); button.disabled = true;
+    try {
+      const result = await window.crosschatDesktop.executeDraft(draft.draftId, draft.revision);
+      draft = null;
+      composeStatus.textContent = result.status === 'submitted' ? (result.summary || 'Slack API 已回報受理；不代表對方已送達或讀取。')
+        : result.status === 'unknown' ? '提交結果不明，請先到 Slack 核對，切勿直接重試。'
+        : result.status === 'duplicate' ? '此訊息已有提交記錄；請先到 Slack 核對。'
+        : `尚未送出：${result.reason || result.status}。請重新預覽。`;
+    } catch { draft = null; composeStatus.textContent = '傳送狀態無法確認；請先到 Slack 核對，切勿直接重試。'; }
+  });
+  const historyList = document.getElementById('history-list');
+  document.getElementById('history-reload').addEventListener('click', async event => {
+    const button = event.currentTarget; button.disabled = true;
+    try {
+      const history = await window.crosschatDesktop.listForwardHistory();
+      const rows = Array.isArray(history?.entries) ? history.entries : [];
+      document.getElementById('history-scope').textContent = history?.truncated === true ? '僅顯示掃描範圍，可能不是最新。' : '';
+      historyList.replaceChildren();
+      if (!rows.length) { const li = document.createElement('li'); li.textContent = '目前沒有可列出的傳送紀錄。'; historyList.append(li); return; }
+      for (const row of rows.slice(0, 20)) {
+        const li = document.createElement('li');
+        const when = Number.isFinite(row.time) ? new Date(row.time).toLocaleString() : '時間不明';
+        const status = row.status === 'submitted' ? 'Slack API 已受理；不代表送達或已讀' : '結果不明。請到目的地核對，勿重送';
+        li.textContent = `${when} · ${row.platform || '平台不明'}${row.targetChatId ? ` · ${row.targetChatId}` : ''} · ${status}`;
+        if (row.openSlack === true && row.platform === 'slack') {
+          const open = document.createElement('button'); open.type = 'button'; open.className = 'history-open'; open.textContent = '開啟 Slack 目的聊天室';
+          open.addEventListener('click', async () => {
+            open.disabled = true;
+            try { const opened = await window.crosschatDesktop.openForwardHistorySlack(row.id); if (!opened) composeStatus.textContent = '無法安全開啟此聊天室；請在 Slack 中自行核對。'; }
+            catch { composeStatus.textContent = '無法開啟 Slack 目的聊天室。'; }
+            finally { open.disabled = false; }
+          });
+          li.append(document.createTextNode(' '), open);
+        }
+        historyList.append(li);
+      }
+    } catch { historyList.textContent = '無法讀取本機紀錄。'; }
+    finally { button.disabled = false; }
+  });
 })();

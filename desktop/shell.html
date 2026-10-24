@@ -10,7 +10,7 @@
 </head>
 <body>
 <div class="chrome">
-  <div class="app-title"><span class="logo">↔</span><b>CrossChat Hub</b><span class="build">多平台桌面工作區 · 預覽版（LINE 未完成）</span></div>
+  <div class="app-title"><span class="logo">↔</span><b>CrossChat Hub</b><span class="build">多平台桌面工作區 · Windows LINE 實驗功能</span></div>
   <nav aria-label="聊天平台" id="tabs">
     <button type="button" class="tab selected" data-tab="telegram" aria-selected="true" role="tab">Telegram</button>
     <button type="button" class="tab" data-tab="discord" aria-selected="false" role="tab">Discord</button>
@@ -20,20 +20,49 @@
     <span class="spacer"></span>
     <button type="button" id="open-browser" title="在系統瀏覽器開啟官方網站（內嵌登入受限時使用）">官方網站 ↗</button>
     <button type="button" id="reload" title="重新載入目前的網站" aria-label="重新載入">↻</button>
+    <button type="button" id="clear-profile" title="清除此平台在本機的登入及網站資料">清除登入</button>
     <button type="button" id="quit" title="完全結束程式" aria-label="結束程式">結束</button>
   </nav>
-  <div class="status"><span id="indicator" aria-hidden="true"></span><span id="status">選擇平台登入；登入資料只留在此裝置，各平台帳號彼此隔離</span></div>
+  <div class="status"><span id="indicator" aria-hidden="true"></span><span id="status">選擇平台登入；登入資料只留在此裝置，各平台帳號彼此隔離</span>
+    <div id="slack-account-controls" class="slack-account-controls" hidden>
+    <span id="slack-account-state" role="status">Slack 帳號狀態載入中</span>
+    <button type="button" id="slack-account-connect">連結 Slack 帳號</button>
+    <button type="button" id="slack-account-cancel" class="secondary" hidden>取消登入</button>
+    <button type="button" id="slack-account-disconnect" class="secondary" hidden>解除 Slack 帳號</button>
+    <button type="button" id="slack-account-reload" class="secondary">重新檢查</button>
+    </div>
+  </div>
 </div>
 <main id="native-content" aria-live="polite">
   <section id="line" class="native-panel" hidden>
     <div class="mark">LINE</div>
-    <h1>LINE 個人聊天尚無法內嵌</h1>
-    <p>LINE 官方在 Windows／macOS 提供桌面應用程式，以及 Google Chrome 專用的 LINE 擴充功能；沒有可安全直接載入的標準網頁聊天網址。Electron 無法保證相容 Chrome 商店擴充功能。</p>
-    <p><strong>此分頁目前不能收發 LINE 私人訊息。</strong> 不會要求在非官方表單中輸入 LINE 密碼，也不會假裝 LINE Login 等同個人聊天登入。</p>
+    <h1>連結已登入的官方 LINE 桌面視窗</h1>
+    <p>先列出並明確綁定你確認已登入的官方 LINE 主視窗，再按下方按鈕啟用。啟用後 LINE 會顯示在工作區右側，Hub 和完整輸入區保留在左側。</p>
+    <p><strong>實驗功能：</strong>強制結束 CrossChat 或原生 broker 可能讓 LINE 視窗暫時離開原本視窗位置；此功能不會關閉或終止 LINE。正常結束會先要求還原並讀回確認，未確認時會保持視窗開啟以便重試。</p>
+    <div class="buttons"><button id="line-enable" type="button">啟用 LINE 實驗功能</button><button id="line-restore" type="button" class="secondary" hidden>還原 LINE 並解除附掛</button></div>
+    <p id="line-native-status" role="status">尚未啟用；列出或綁定不會移動 LINE 視窗。</p>
     <div class="buttons"><button type="button" data-line-link="desktop">開啟 LINE 官方下載</button><button type="button" data-line-link="chrome" class="secondary">開啟官方 Chrome 擴充功能</button></div>
+    <div id="line-binding" class="line-binding">
+      <h2>選擇已登入的 LINE 主視窗</h2>
+      <p>列出只會檢查官方 LINE 程序與主視窗中繼資料，不會讀取標題、聊天內容或控制項，也不會切換或聚焦視窗。請自行確認登入狀態與視窗用途。</p>
+      <div class="buttons"><button id="line-candidates-refresh" type="button">列出 LINE 視窗</button><button id="line-unbind" type="button" class="secondary" hidden>解除綁定</button></div>
+      <p id="line-binding-status" role="status">尚未綁定。列出視窗不會自動選擇。</p>
+      <ol id="line-candidate-list"></ol>
+    </div>
     <small>其他四個分頁會使用各平台官方網頁介面。能否成功登入仍取決於平台是否允許使用 Electron 內嵌 Chromium。</small>
   </section>
   <section id="connecting" class="native-panel"><div class="spinner"></div><h2>載入官方聊天網站中</h2><p>首次使用請依該平台自己的登入流程完成驗證。</p></section>
+  <section id="profile-state" class="native-panel" hidden><h2 id="profile-state-title"></h2><p id="profile-state-detail"></p></section>
 </main>
+<section id="composer" aria-label="跨軟體統一輸入">
+  <div class="compose-mode"><label for="compose-mode">訊息模式</label><select id="compose-mode"><option value="compose">新訊息</option><option value="selection">轉發單則文字</option></select><small id="compose-help">例如 @line:群組名:人名 要說的話；名稱含空白請用雙引號</small></div>
+  <div id="compose-source" hidden><label>來源平台 <select id="source-platform"><option value="line">LINE</option><option value="slack">Slack</option><option value="telegram">Telegram</option><option value="discord">Discord</option><option value="whatsapp">WhatsApp</option></select></label><label>來源聊天室 <input id="source-chat" maxlength="512" placeholder="你確認的來源聊天室名稱"></label><span id="selection-source-hint">人工貼入，來源未經平台驗證</span><button type="button" id="selection-arm" hidden>準備讀取選取文字</button><button type="button" id="selection-cancel" class="secondary" hidden>取消讀取</button></div>
+  <label for="compose-text" id="compose-text-label">跨軟體訊息</label>
+  <textarea id="compose-text" rows="2" maxlength="16000" placeholder="@line:群組名 訊息內容" spellcheck="false"></textarea>
+  <label id="compose-route-row" hidden>轉發目的地 <input id="compose-route" maxlength="1024" placeholder="@slack:頻道名（只填目的地，不填內容）"></label>
+  <div id="slack-destination-preview" hidden><button type="button" id="slack-destination-select" class="secondary">記住目前 Slack 目的地</button><button type="button" id="slack-destination-use" class="secondary" disabled>使用此 Slack 目的地</button><span id="slack-destination-status">名稱不會讀取；必須由你明確選用。</span></div>
+  <div class="compose-actions"><button type="button" id="compose-preview">預覽目的地</button><button type="button" id="compose-send" disabled>傳送</button><span id="compose-status" role="status">預覽前不會發送。</span></div>
+</section>
+<section id="forward-history" aria-label="最近傳送紀錄"><div class="history-heading"><strong>最近傳送紀錄</strong><button type="button" id="history-reload" class="secondary">重新整理</button></div><small id="history-scope" role="status"></small><ol id="history-list"><li>按「重新整理」查看本機紀錄。</li></ol></section>
 </body>
 </html>

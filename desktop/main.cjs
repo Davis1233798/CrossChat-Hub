@@ -1,14 +1,31 @@
 'use strict';
-const { app, BrowserWindow, WebContentsView, ipcMain, shell, session, dialog } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, shell, session, dialog, globalShortcut } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { SERVICES, LINE_DOWNLOADS, getService, safeNavigation } = require('./tab-config.cjs');
+const { SERVICES, LINE_DOWNLOADS, getService } = require('./tab-config.cjs');
+const { protectContents } = require('./navigation.cjs');
+const { createShutdown, flushSessions } = require('./lifecycle.cjs');
+const { createSessionReset } = require('./session-data.cjs');
+const { createResetIntentStore } = require('./reset-intent.cjs');
+const { createWorkspaceState } = require('./workspace-state.cjs');
+const { createForwardingLedger } = require('./forwarding-ledger.cjs');
+const { registerForwardingIpc } = require('./forwarding-ipc.cjs');
+const { createSlackDestinationSnapshots } = require('./slack-destination.cjs');
+const { createSlackAccountService } = require('./slack-account.cjs');
+const slackAppConfig = require('./slack-app-config.json');
+const { createLineBinding } = require('./line-binding.cjs');
+const { createLineWitnessClient } = require('./line-witness-client.cjs');
+const { createSelectionArming } = require('./selection-arming.cjs');
 const { isOfficialOrigin, canCheckPermission, needsUserApproval } = require('./permissions.cjs');
+const { nativeHelperPaths } = require('./native-helper-paths.cjs');
+// Must precede single-instance lock AND every profile-backed store/session.
+const brokerStudy = require('./native-broker-study.cjs').configureBrokerStudy(app);
 
 // Each official site runs in its own hardened, persistent Chromium profile.
 // This is not an API bridge: no password interception, cookie export, or
 // injection into a remote messenger is performed.
 const HEADER_HEIGHT = 116;
+const COMPOSER_HEIGHT = 300;
 const singleInstance = app.requestSingleInstanceLock();
 let mainWindow = null;
 let currentId = null;
@@ -16,7 +33,29 @@ let currentView = null;
 const views = new Map();
 const configuredPartitions = new Set();
 const permissionGrants = new Set();
+const popupWindows = new Map();
+const permissionVersions = new Map();
+const activeDownloads = new Map();
+let externalPromptPending = false;
 let closing = false;
+let lineBroker = null;
+let quitRequested = false;
+let cancelSelectionArm = () => {};
+let slackAccount = null;
+const workspaceState = createWorkspaceState(path.join(app.getPath('userData'), 'workspace-state'));
+
+function rememberWorkspace(contents, service) {
+  if (service.id !== 'slack') return;
+  const record = (_event, url, isMainFrame = true) => {
+    if (!isMainFrame || closing || contents.isDestroyed() || profileReset.isBlocked(service.id)) return;
+    try { workspaceState.record(url); }
+    catch { announce(service.id, 'workspace-save-error'); }
+  };
+  // did-navigate is top-level only; its third argument is an HTTP status,
+  // whereas did-navigate-in-page supplies the actual main-frame flag.
+  contents.on('did-navigate', (event, url) => record(event, url, true));
+  contents.on('did-navigate-in-page', record);
+}
 
 if (!singleInstance) app.quit();
 
@@ -26,7 +65,7 @@ function isTrustedSender(event) {
 function viewBounds() {
   if (!mainWindow) return { x: 0, y: HEADER_HEIGHT, width: 1000, height: 650 };
   const { width, height } = mainWindow.getContentBounds();
-  return { x: 0, y: HEADER_HEIGHT, width, height: Math.max(1, height - HEADER_HEIGHT) };
+  return { x: 0, y: HEADER_HEIGHT, width, height: Math.max(1, height - HEADER_HEIGHT - COMPOSER_HEIGHT) };
 }
 function announce(id, state, detail = '') {
   if (!closing && mainWindow && !mainWindow.isDestroyed()) {
@@ -44,8 +83,10 @@ function configureSession(service) {
 
   // Chromium first checks permissions synchronously, then requests consent.
   // Never permit a third-party link or embedded frame to access devices.
-  isolated.setPermissionCheckHandler((_wc, permission, origin) => canCheckPermission(service.id, origin, permission));
+  isolated.setPermissionCheckHandler((_wc, permission, origin) => !closing && !profileReset.isBlocked(service.id) && canCheckPermission(service.id, origin, permission));
   isolated.setPermissionRequestHandler((wc, permission, callback, details) => {
+    if (closing || profileReset.isBlocked(service.id)) return callback(false);
+    const version = permissionVersions.get(service.id) || 0;
     const origin = officialOriginForRequest(service, wc, details);
     if (!origin || !canCheckPermission(service.id, origin, permission)) return callback(false);
     if (!needsUserApproval(permission)) return callback(true);
@@ -58,12 +99,16 @@ function configureSession(service) {
       detail: '只有本次執行期間會記住授權。你可以拒絕而繼續使用一般文字聊天。',
       buttons: ['拒絕', '允許'], defaultId: 0, cancelId: 0, noLink: true,
     }).then(({ response }) => {
-      if (response === 1) permissionGrants.add(key);
-      callback(response === 1);
+      const allowed = response === 1 && !closing && !profileReset.isBlocked(service.id) && version === (permissionVersions.get(service.id) || 0);
+      if (allowed) permissionGrants.add(key);
+      callback(allowed);
     }).catch(() => callback(false));
   });
 
   isolated.on('will-download', (_event, item, _contents) => {
+    if (closing || profileReset.isBlocked(service.id)) { _event.preventDefault(); return; }
+    if (!activeDownloads.has(service.id)) activeDownloads.set(service.id, new Set());
+    activeDownloads.get(service.id).add(item);
     // Let the user choose the destination; do not silently accept download paths.
     const cleanName = path.basename(item.getFilename().replace(/[\\/]/g, '_')) || 'download';
     item.setSaveDialogOptions({
@@ -71,13 +116,21 @@ function configureSession(service) {
       defaultPath: path.join(app.getPath('downloads'), cleanName),
       buttonLabel: '儲存',
     });
-    item.once('done', (_e, state) => announce(service.id, state === 'completed' ? 'downloaded' : 'download-error'));
+    item.once('done', (_e, state) => {
+      activeDownloads.get(service.id)?.delete(item);
+      if (!profileReset.isBlocked(service.id)) announce(service.id, state === 'completed' ? 'downloaded' : 'download-error');
+    });
   });
   return isolated;
 }
 function tabView(service) {
   const existing = views.get(service.id);
   if (existing && !existing.webContents.isDestroyed()) return existing;
+  if (brokerStudy) {
+    const fixtureView = brokerStudy.createView(WebContentsView);
+    views.set(service.id, fixtureView);
+    return fixtureView;
+  }
   configureSession(service);
   const view = new WebContentsView({
     webPreferences: {
@@ -89,30 +142,60 @@ function tabView(service) {
   });
   view.setBackgroundColor('#0b1220');
   const wc = view.webContents;
-  wc.setWindowOpenHandler(({ url }) => {
-    if (!safeNavigation(url)) return { action: 'deny' };
-    // Preserve the opener relationship for provider OAuth and phone/QR login.
-    // Each popup inherits the same isolated platform profile.
-    return { action: 'allow', overrideBrowserWindowOptions: {
-      width: 830, height: 790,
-      webPreferences: {
-        partition: service.partition, sandbox: true, nodeIntegration: false,
-        contextIsolation: true, webSecurity: true,
-      },
-    } };
-  });
-  wc.on('will-navigate', (event, url) => { if (!safeNavigation(url)) event.preventDefault(); });
-  wc.on('did-start-loading', () => announce(service.id, 'loading'));
-  wc.on('did-finish-load', () => announce(service.id, 'loaded'));
+  const report = (state, detail) => {
+    if (views.get(service.id) === view && !wc.isDestroyed() && !profileReset.isBlocked(service.id)) announce(service.id, state, detail);
+  };
+  protectContents(wc, service, { openExternal: async url => {
+    if (closing || externalPromptPending || !mainWindow || mainWindow.isDestroyed()) return;
+    externalPromptPending = true;
+    try {
+      const { response } = await dialog.showMessageBox(mainWindow, {
+        type: 'question', title: '開啟外部網站',
+        message: `要在系統瀏覽器開啟 ${new URL(url).origin}？`,
+        detail: '此網站不在此平台的內嵌登入清單中。外部登入不會同步回本程式；自訂企業 SSO 可能無法完成登入。',
+        buttons: ['取消', '開啟瀏覽器'], defaultId: 0, cancelId: 0, noLink: true,
+      });
+      if (response === 1 && !closing) await shell.openExternal(url);
+    } catch { announce(service.id, 'external-error'); }
+    finally { externalPromptPending = false; }
+  }, onWorkspaceLaunch: url => {
+    if (closing || wc.isDestroyed() || profileReset.isBlocked(service.id)) return;
+    chooseTab(service.id);
+    wc.loadURL(url).catch(error => report('failed', String(error.message)));
+  }, onPopup: popup => {
+    popupWindows.set(popup, service.id);
+    popup.once('closed', () => popupWindows.delete(popup));
+    attachHotkeys(popup.webContents);
+    rememberWorkspace(popup.webContents, service);
+  } });
+  rememberWorkspace(wc, service);
+  if (service.id === 'slack') {
+    wc.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => slackDestinationSnapshots.navigationStarted(wc, isMainFrame));
+    wc.on('did-navigate', (_event, url) => slackDestinationSnapshots.navigationCompleted(wc, url, true));
+    wc.on('did-navigate-in-page', (_event, url, isMainFrame) => slackDestinationSnapshots.navigationCompleted(wc, url, isMainFrame));
+    wc.on('did-fail-load', (_event, _code, _description, _url, isMainFrame) => {
+      if (isMainFrame) slackDestinationSnapshots.navigationStarted(wc, true);
+    });
+    wc.once('destroyed', () => slackDestinationSnapshots.navigationStarted(wc, true));
+  }
+  attachHotkeys(wc);
+  wc.on('did-start-loading', () => report('loading'));
+  wc.on('did-finish-load', () => report('loaded'));
   wc.on('did-fail-load', (_event, code, description, _url, isMainFrame) => {
-    if (isMainFrame && code !== -3) announce(service.id, 'failed', `${code} ${description}`);
+    if (isMainFrame && code !== -3) report('failed', `${code} ${description}`);
   });
   wc.on('page-title-updated', (_event, title) => {
     const count = title.match(/^\((\d+)\)/)?.[1];
-    announce(service.id, 'title', count ? String(Math.min(Number(count), 999)) : '');
+    report('title', count ? String(Math.min(Number(count), 999)) : '');
   });
   views.set(service.id, view);
-  wc.loadURL(service.url).catch(error => announce(service.id, 'failed', String(error.message)));
+  const isolatedSmoke = process.env.CROSSCHAT_PRODUCT_SMOKE === '1' && path.basename(process.argv[1] ?? '') === 'desktop-smoke.cjs';
+  let initialUrl = isolatedSmoke ? 'data:text/html,<title>CrossChat isolated smoke fixture</title><main>Offline smoke fixture</main>' : service.url;
+  if (service.id === 'slack') {
+    try { initialUrl = workspaceState.read() || initialUrl; }
+    catch { report('workspace-save-error'); }
+  }
+  wc.loadURL(initialUrl).catch(error => report('failed', String(error.message)));
   return view;
 }
 function chooseTab(id) {
@@ -121,14 +204,91 @@ function chooseTab(id) {
   if (!mainWindow || mainWindow.isDestroyed() || closing) return;
   if (currentView) { mainWindow.contentView.removeChildView(currentView); currentView = null; }
   currentId = id;
-  if (service.kind === 'web') {
+  if (lineBroker) {
+    lineBroker.setLineVisible(id === 'line').catch(error => announce('line', 'restore-error', error.message));
+  }
+  announce(id, 'selected');
+  if (service.kind === 'web' && !profileReset.isBlocked(id)) {
     currentView = tabView(service);
     mainWindow.contentView.addChildView(currentView);
     currentView.setBounds(viewBounds());
     currentView.webContents.focus();
   }
-  announce(id, service.kind !== 'web' ? 'unsupported' : (currentView.webContents.isLoading() ? 'loading' : 'loaded'));
+  announce(id, service.kind === 'web' ? (profileReset.isBlocked(id) ? (profileReset.isPending(id) ? 'resetting' : 'reset-error') : (currentView.webContents.isLoading() ? 'loading' : 'loaded')) : service.kind === 'native-line-experimental' ? (lineBroker?.enabled ? 'native-enabled' : 'native-ready') : 'unsupported');
 }
+async function requestQuit() {
+  if (quitRequested || closing) return;
+  quitRequested = true;
+  if (lineBroker?.active) {
+    const restored = await lineBroker.detachAndRestoreHub().catch(error => ({ restored: false, detail: error.message }));
+    if (!restored.restored) {
+      await lineBroker.releaseCloseRequest().catch(() => false);
+      quitRequested = false;
+      announce('line', 'restore-error', restored.detail || 'LINE 尚未確認還原；視窗保持開啟，請重試。');
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+      return;
+    }
+  } else if (lineBroker?.blocked) {
+    quitRequested = false;
+    announce('line', 'restore-error', '原生 broker 已停止，無法確認 LINE 視窗已還原。請先確認 LINE 視窗，再處理 CrossChat。');
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+    return;
+  }
+  void quitSafely();
+}
+function destroyServiceWriters(service) {
+  const view = views.get(service.id);
+  if (service.id === 'slack') slackDestinationSnapshots.invalidate();
+  if (view && currentView === view) {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.contentView.removeChildView(view);
+    currentView = null;
+  }
+  if (view && !view.webContents.isDestroyed()) view.webContents.destroy();
+  views.delete(service.id);
+  for (const [popup, id] of popupWindows) {
+    if (id === service.id && !popup.isDestroyed()) popup.destroy();
+  }
+  for (const item of activeDownloads.get(service.id) || []) item.cancel();
+  activeDownloads.delete(service.id);
+}
+const resetIntents = createResetIntentStore(path.join(app.getPath('userData'), 'pending-profile-resets'), SERVICES.filter(service => service.kind === 'web').map(service => service.id));
+const profileReset = createSessionReset({
+  initialBlocked: resetIntents.pending(), persistIntent: resetIntents.mark,
+  clearIntent: id => {
+    if (id === 'slack') workspaceState.clear();
+    resetIntents.clear(id);
+  },
+  getService, getSession: service => configureSession(service),
+  isClosing: () => closing,
+  confirm: async service => {
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'warning', title: `清除 ${service.title} 本機登入資料`,
+      message: `要清除 ${service.title} 在此裝置上的登入與網站資料？`,
+      detail: '此平台的視窗和未完成下載會關閉，下次使用需要重新登入。其他平台、其他裝置及已儲存的附件不受影響。這不會撤銷伺服器端的裝置授權；請使用官方平台的裝置管理功能。',
+      buttons: ['取消', '清除本機資料'], defaultId: 0, cancelId: 0, noLink: true,
+    });
+    return response === 1;
+  },
+  destroyWriters: destroyServiceWriters,
+  revokePermissions: id => {
+    permissionVersions.set(id, (permissionVersions.get(id) || 0) + 1);
+    for (const key of permissionGrants) if (key.startsWith(`${id}|`)) permissionGrants.delete(key);
+    announce(id, 'title', '');
+  },
+  onState: (id, state) => {
+    announce(id, state);
+    if (state === 'cleared' && !closing && currentId === id) chooseTab(id);
+  },
+});
+const slackDestinationSnapshots = createSlackDestinationSnapshots({
+  getSlackView: () => views.get('slack'),
+  getActiveSlackView: () => currentId === 'slack' && currentView === views.get('slack') ? currentView : null,
+  getPartition: () => getService('slack').partition,
+  isBlocked: () => profileReset.isBlocked('slack') || closing,
+  onInvalidate: () => {
+    if (!closing && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('crosschat:slack-destination-invalidated');
+  },
+});
 function attachHotkeys(contents) {
   contents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || !(input.control || input.meta)) return;
@@ -144,18 +304,34 @@ function attachHotkeys(contents) {
     }
   });
 }
-function quitImmediately() {
-  if (closing) return;
-  closing = true;
-  for (const view of views.values()) {
-    if (!view.webContents.isDestroyed()) view.webContents.destroy();
-  }
-  views.clear();
-  app.exit(0);
-}
+const quitSafely = createShutdown({
+  prepare: () => {
+    closing = true;
+    slackAccount?.close();
+    cancelSelectionArm();
+    brokerStudy?.beginShutdown();
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+    // Stop every remote writer, including authentication popups, before flushing.
+    for (const popup of popupWindows.keys()) if (!popup.isDestroyed()) popup.destroy();
+    popupWindows.clear();
+    if (currentView && mainWindow && !mainWindow.isDestroyed()) mainWindow.contentView.removeChildView(currentView);
+    currentView = null;
+    for (const view of views.values()) {
+      if (!view.webContents.isDestroyed()) view.webContents.destroy();
+    }
+    views.clear();
+  },
+  flush: async () => {
+    await profileReset.waitForActive();
+    await flushSessions([session.defaultSession, ...[...configuredPartitions].map(partition => session.fromPartition(partition))]);
+  },
+  exit: code => app.exit(brokerStudy?.failed ? 1 : code),
+  onFailure: () => console.error('Desktop session persistence failed or timed out during shutdown.'),
+});
 async function openWindow() {
   mainWindow = new BrowserWindow({
-    title: 'CrossChat Hub', show: false,
+    title: brokerStudy ? 'CrossChat Hub · isolated broker study' : 'CrossChat Hub', show: false,
+    frame: !brokerStudy,
     width: 1320, height: 850, minWidth: 920, minHeight: 620,
     backgroundColor: '#0b1220',
     webPreferences: {
@@ -170,40 +346,169 @@ async function openWindow() {
   });
   attachHotkeys(mainWindow.webContents);
   mainWindow.on('resize', () => currentView?.setBounds(viewBounds()));
-  mainWindow.on('closed', quitImmediately);
+  mainWindow.on('close', event => { event.preventDefault(); void requestQuit(); });
+  mainWindow.on('closed', () => { void requestQuit(); });
   await mainWindow.loadFile(path.join(__dirname, 'shell.html'));
-  if (!closing) mainWindow.show();
+  if (!closing) {
+    if (brokerStudy) await brokerStudy.attach(mainWindow, () => { void quitSafely(); });
+    else mainWindow.show();
+  }
 }
 if (singleInstance) {
-  app.on('second-instance', () => { if (mainWindow && !mainWindow.isDestroyed()) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus(); } });
+  app.on('second-instance', () => { if (mainWindow && !mainWindow.isDestroyed()) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); } });
   app.whenReady().then(async () => {
+    if (brokerStudy) await brokerStudy.start();
+    const { createForwardingDrafts } = await import('./forwarding-drafts.mjs');
+    const { createNativeSelectionClient } = await import('./native-selection-client.mjs');
+    const nativePaths = nativeHelperPaths({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() });
+    const smokeHooks = process.env.CROSSCHAT_PRODUCT_SMOKE === '1' && path.basename(process.argv[1] ?? '') === 'desktop-smoke.cjs'
+      ? globalThis[Symbol.for('crosschat.productSmokeHooks')] : null;
+    const { createSlackPkce } = await import('./slack-pkce.mjs');
+    const { createSlackUserApi } = await import('./slack-user-api.mjs');
+    const { createSlackPersonalAdapter } = await import('./slack-personal-adapter.mjs');
+    const pkce = smokeHooks?.slackAccount ? smokeHooks.slackAccount.pkce : createSlackPkce({
+      clientId: slackAppConfig.clientId,
+      registeredLoopbackRedirectUri: slackAppConfig.registeredLoopbackRedirectUri,
+    });
+    const slackUserApi = smokeHooks?.slackAccount ? smokeHooks.slackAccount.userApi : createSlackUserApi();
+    slackAccount = createSlackAccountService({
+      pkce, userApi: slackUserApi,
+      safeStorage: smokeHooks?.slackAccount?.safeStorage ?? require('electron').safeStorage,
+      clientId: smokeHooks?.slackAccount?.clientId ?? slackAppConfig.clientId,
+      registeredLoopbackRedirectUri: smokeHooks?.slackAccount?.registeredLoopbackRedirectUri ?? slackAppConfig.registeredLoopbackRedirectUri,
+      filePath: path.join(app.getPath('userData'), 'slack-user-account.enc'),
+    });
+    await slackAccount.reload();
+    if (closing) slackAccount.close();
+    const lineWitness = process.platform === 'win32' ? createLineWitnessClient({
+      binaryPath: nativePaths.lineWitness,
+    }) : null;
+    const fixtureWitness = { pid: 8123, startTicks: '420024', hwnd: '9123', path: 'C:\\fixtures\\LINE.exe',
+      publisher: 'Synthetic Routing Fixture', sha256: 'f'.repeat(64), dpiContext: 'synthetic-fixture' };
+    const lineBinding = createLineBinding({
+      listCandidates: () => smokeHooks ? Promise.resolve([fixtureWitness]) : lineWitness ? lineWitness.listCandidates() : Promise.reject(new Error('LINE binding is available only in the Windows development build')),
+      validateWitness: witness => smokeHooks ? Promise.resolve({ ...witness }) : lineWitness ? lineWitness.validateWitness(witness) : Promise.reject(new Error('LINE binding helper unavailable')),
+    });
+    if (process.platform === 'win32' && !brokerStudy) {
+      const { createNativeLineBroker } = require('./native-line-broker.cjs');
+      lineBroker = createNativeLineBroker({ binaryPath: nativePaths.lineBroker });
+      lineBroker.onStatus(({ state, detail }) => {
+        announce('line', state === 'enabled' ? 'native-enabled' : state === 'error' || state === 'restore-error' ? 'restore-error' : state, detail);
+        if (state === 'close-request') void requestQuit();
+      });
+    }
+    const selectionClient = smokeHooks ? null : createNativeSelectionClient({
+      binaryPath: nativePaths.readOnlyRouting,
+      witnessFor: platform => lineBinding.witnessFor(platform),
+    });
+    const ledger = createForwardingLedger(path.join(app.getPath('userData'), 'forwarding-ledger'));
+    const drafts = createForwardingDrafts({
+      validateDestination: selectionId => smokeHooks?.slackDestination?.resolveSelection(selectionId) ?? slackDestinationSnapshots.resolveSelection(selectionId),
+      adapterFor: (platform, destination, sourceValid) => {
+        if (platform !== 'slack' || !destination) return null;
+        const status = slackAccount.getStatus();
+        return createSlackPersonalAdapter({ accountService: slackAccount, userApi: slackUserApi,
+          destinations: smokeHooks?.slackDestination ?? slackDestinationSnapshots, selectionId: destination.selectionId,
+          selectedAccount: status.state === 'connected' ? status.account : null, sourceValid });
+      },
+      observeSelection: platform => smokeHooks ? smokeHooks.observeSelection(platform) : process.platform === 'win32' ? selectionClient.observe(platform) : Promise.resolve({ status: 'unsupported', reason: 'selection-helper-unavailable' }),
+      ledger,
+      // No verified personal-chat UI adapter is registered yet.
+    });
+    const selectionArming = createSelectionArming({
+      register: (accelerator, callback) => smokeHooks ? smokeHooks.registerShortcut(accelerator, callback) : globalShortcut.register(accelerator, callback),
+      unregister: accelerator => smokeHooks ? smokeHooks.unregisterShortcut(accelerator) : globalShortcut.unregister(accelerator),
+      isBound: async () => Boolean(await lineBinding.witnessFor('line')),
+      capture: input => drafts.captureObservedSelection(input),
+      discard: input => drafts.revokeSelection(input),
+      onResult: result => { if (!closing && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('crosschat:selection-observed', result); },
+    });
+    cancelSelectionArm = () => selectionArming.close();
+    ipcMain.handle('crosschat:slack-account-status', event => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      return slackAccount.getStatus();
+    });
+    ipcMain.handle('crosschat:slack-account-reload', async event => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      await slackAccount.reload(); return slackAccount.getStatus();
+    });
+    ipcMain.handle('crosschat:slack-account-connect', async event => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      if (brokerStudy && !smokeHooks?.slackAccount) return { state: 'unavailable', detail: 'isolated-smoke' };
+      await slackAccount.connect(url => smokeHooks?.slackAccount?.openExternal
+        ? smokeHooks.slackAccount.openExternal(url) : shell.openExternal(url));
+      return slackAccount.getStatus();
+    });
+    ipcMain.handle('crosschat:slack-account-cancel', event => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      return slackAccount.cancel();
+    });
+    ipcMain.handle('crosschat:slack-account-disconnect', async event => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      return slackAccount.disconnect();
+    });
+    registerForwardingIpc(ipcMain, () => mainWindow, pathToFileURL(path.join(__dirname, 'shell.html')).href, drafts, lineBinding, selectionArming, slackDestinationSnapshots, ref => {
+      const route = ledger.resolveHistorySlackRoute(ref);
+      if (!route || closing || profileReset.isBlocked('slack')) return false;
+      chooseTab('slack');
+      const view = views.get('slack');
+      if (!view || view.webContents.isDestroyed()) return false;
+      const url = `https://app.slack.com/client/${route.teamId}/${route.chatId}`;
+      view.webContents.loadURL(url).catch(() => announce('slack', 'failed'));
+      return true;
+    });
     ipcMain.handle('crosschat:tab-switch', (event, id) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
       chooseTab(id); return true;
     });
+    ipcMain.handle('crosschat:line-enable', async event => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      if (!lineBroker) return { state: 'unavailable', detail: 'Windows native LINE is unavailable.' };
+      if (closing || currentId !== 'line') return { state: 'inactive' };
+      const witness = await lineBinding.validatedWitnessFor('line');
+      if (!witness) return { state: 'unbound', detail: '請先確認並綁定已登入的官方 LINE 主視窗。' };
+      try { return await lineBroker.enable(mainWindow, witness); }
+      catch (error) { return { state: 'error', detail: error.message }; }
+    });
+    ipcMain.handle('crosschat:line-restore', async event => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      if (!lineBroker) return { restored: true, inactive: true };
+      if (!lineBroker.active && lineBroker.blocked) return { restored: false, detail: '原生 broker 已停止，無法確認 LINE 視窗已還原。請先確認 LINE 視窗。' };
+      if (!lineBroker.active) return { restored: true, inactive: true };
+      return lineBroker.detachAndRestoreHub();
+    });
     ipcMain.handle('crosschat:tab-reload', (event, id) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      if (closing || profileReset.isBlocked(id)) return false;
       const wc = views.get(id)?.webContents;
       if (currentId !== id || !wc || wc.isDestroyed()) return false;
       wc.reload(); return true;
     });
+    ipcMain.handle('crosschat:profile-clear', (event, id) => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      if (brokerStudy) return { state: 'unavailable' };
+      return profileReset.request(id);
+    });
     ipcMain.handle('crosschat:open-browser', (event, id) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      if (brokerStudy) return false;
       const service = getService(id);
       if (!service?.url) return false;
       return shell.openExternal(service.url).then(() => true);
     });
     ipcMain.handle('crosschat:line-official', (event, kind) => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
+      if (brokerStudy) return false;
       const url = kind === 'chrome' ? LINE_DOWNLOADS.chrome : LINE_DOWNLOADS[process.platform === 'darwin' ? 'mac' : 'windows'];
       if (!url) return false;
       return shell.openExternal(url).then(() => true);
     });
     ipcMain.handle('crosschat:quit', event => {
       if (!isTrustedSender(event)) throw new Error('Untrusted renderer');
-      quitImmediately();
+      void requestQuit();
     });
     await openWindow();
   }).catch(error => { console.error('Desktop failed to start:', error); app.exit(1); });
-  app.on('window-all-closed', quitImmediately);
+  app.on('before-quit', event => { event.preventDefault(); void requestQuit(); });
+  app.on('window-all-closed', () => { void requestQuit(); });
 }

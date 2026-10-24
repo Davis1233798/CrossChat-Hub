@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "CrossChat LINE host capability fixture",
+  "version": "0.1.0",
+  "description": "Synthetic host diagnostics; no accounts, messages or LINE code.",
+  "permissions": [
+    "storage",
+    "notifications",
+    "downloads",
+    "cookies",
+    "system.display"
+  ],
+  "background": {
+    "service_worker": "worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open host diagnostic"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq1fJsDqMDa2GAIXYyHCQfk2BCBRLC+v4PHxmzjJ9Y4u1z9IZr00DVdzjvaihMYD9+6Pjm5KUoAGKuSIKZBRVaSwhTLSnZ23TJgAbaZ/GDNqrjX48kSdTjLzQ24VPTM/pRqFROZLGZ2QTpjsX3PCskcc5K6Eo8kLg+AKqX4g1RS2+VtcXM2irB/jmck1p+k+XI49xav8R4+Z/TXb0SseWv8KE2p8PVHXnwt2vZiUG1c+eTD9jd21tZz/k1AIemnUcEOUuW+diq9Efvc1glm28j74hF0d32nys9OlasJ8kg90ZadZjA9OLPUZNRdBKckpSrydyLJZBAgglLwugTmYnwwIDAQAB"
+}
