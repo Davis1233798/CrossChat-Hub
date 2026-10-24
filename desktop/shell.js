@@ -357,7 +357,9 @@
   document.getElementById('history-reload').addEventListener('click', async event => {
     const button = event.currentTarget; button.disabled = true;
     try {
-      const rows = await window.crosschatDesktop.listForwardHistory();
+      const history = await window.crosschatDesktop.listForwardHistory();
+      const rows = Array.isArray(history?.entries) ? history.entries : [];
+      document.getElementById('history-scope').textContent = history?.truncated === true ? '僅顯示掃描範圍，可能不是最新。' : '';
       historyList.replaceChildren();
       if (!rows.length) { const li = document.createElement('li'); li.textContent = '目前沒有可列出的傳送紀錄。'; historyList.append(li); return; }
       for (const row of rows.slice(0, 20)) {

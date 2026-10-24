@@ -2,6 +2,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const validId = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 1024;
+const validPlatform = value => ['line', 'telegram', 'discord', 'slack', 'whatsapp'].includes(value);
+const validReceipt = receipt => Boolean(receipt && validId(receipt.messageId) && validPlatform(receipt.target?.platform) &&
+  validId(receipt.target?.accountId) && validId(receipt.target?.chatId));
+const validRouting = routing => Boolean(routing?.version === 1 && routing.platform === 'slack' &&
+  /^T[A-Z0-9]+$/.test(routing.teamId ?? '') && /^[CGD][A-Z0-9]+$/.test(routing.chatId ?? ''));
 
 // Exclusive creation is the cross-process arbiter. Never remove reservations:
 // a crash/partial write must block blind retries, not make another send possible.
@@ -40,7 +46,7 @@ function createForwardingLedger(directory) {
       fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
       let safeRouting;
       if (routing !== null) {
-        if (routing?.version !== 1 || routing.platform !== 'slack' || !/^T[A-Z0-9]+$/.test(routing.teamId ?? '') || !/^[CGD][A-Z0-9]+$/.test(routing.chatId ?? '')) throw new Error('Invalid forwarding routing metadata');
+        if (!validRouting(routing)) throw new Error('Invalid forwarding routing metadata');
         safeRouting = { version: 1, platform: 'slack', teamId: routing.teamId, chatId: routing.chatId };
       }
       try { writeExclusive(file, { version: 1, status: 'pending', createdAt: Date.now(), ...(safeRouting ? { routing: safeRouting } : {}) }); }
@@ -54,9 +60,7 @@ function createForwardingLedger(directory) {
       let receipt;
       if (outcome.status === 'submitted') {
         const r = outcome.receipt;
-        const valid = value => typeof value === 'string' && value.trim() && value.length <= 1024;
-        if (!r || !valid(r.messageId) || !r.target || !['line', 'telegram', 'discord', 'slack', 'whatsapp'].includes(r.target.platform) ||
-            !valid(r.target.accountId) || !valid(r.target.chatId)) throw new Error('Invalid submission receipt');
+        if (!validReceipt(r)) throw new Error('Invalid submission receipt');
         receipt = { messageId: r.messageId, target: { platform: r.target.platform, accountId: r.target.accountId, chatId: r.target.chatId } };
       }
       if (!owned.has(key)) {
@@ -76,8 +80,23 @@ function createForwardingLedger(directory) {
     get(key) {
       const claim = read(keyPath(key, 'claim'));
       if (!claim) return null;
+      if (claim.version !== 1 || claim.status !== 'pending' || !Number.isFinite(claim.createdAt) || claim.createdAt < 0) return { version: 1, status: 'unknown' };
       const outcome = read(keyPath(key, 'outcome'));
-      if (outcome && ['submitted', 'unknown'].includes(outcome.status)) return outcome;
+      if (outcome) {
+        const validTime = Number.isFinite(outcome.settledAt) && outcome.settledAt >= 0;
+        const route = claim.routing;
+        const hasRoute = route !== undefined && route !== null;
+        const routeValid = !hasRoute || validRouting(route);
+        const routeMatch = !hasRoute || (routeValid && outcome.status === 'submitted' && outcome.receipt?.target?.platform === route.platform && outcome.receipt?.target?.chatId === route.chatId) ||
+          (routeValid && outcome.status !== 'submitted');
+        if (outcome.version === 1 && validTime && routeMatch && outcome.status === 'unknown') return { version: 1, status: 'unknown', settledAt: outcome.settledAt };
+        if (outcome.version === 1 && validTime && routeMatch && outcome.status === 'submitted' && validReceipt(outcome.receipt)) {
+          return { version: 1, status: 'submitted', settledAt: outcome.settledAt,
+            receipt: { messageId: outcome.receipt.messageId, target: { platform: outcome.receipt.target.platform,
+              accountId: outcome.receipt.target.accountId, chatId: outcome.receipt.target.chatId } } };
+        }
+        return { version: 1, status: 'unknown' };
+      }
       return { version: 1, status: owned.has(key) ? 'pending' : 'unknown' };
     },
     listRecent(limit = 20) {
@@ -91,7 +110,8 @@ function createForwardingLedger(directory) {
       // Bound total directory work as well as returned records. Never follow
       // links and never expose filesystem names or the delivery key to renderer.
       const names = [];
-      try { for (let i = 0; i < 1000; i++) { const entry = dir.readSync(); if (!entry) break; names.push(entry.name); } }
+      let truncated = false;
+      try { for (let i = 0; i <= 1000; i++) { const entry = dir.readSync(); if (!entry) break; if (i === 1000) { truncated = true; break; } names.push(entry.name); } }
       finally { dir.closeSync(); }
       const keys = new Set();
       for (const name of names) {
@@ -113,29 +133,34 @@ function createForwardingLedger(directory) {
           if (outStat && outStat.isFile() && outStat.size <= 16_384) outcome = read(outcomePath);
           else outcome = null;
         } catch { claim = null; outcome = null; }
-        const validReceipt = outcome?.receipt && typeof outcome.receipt.messageId === 'string' && outcome.receipt.messageId.length <= 1024 &&
-          ['line', 'telegram', 'discord', 'slack', 'whatsapp'].includes(outcome.receipt.target?.platform) &&
-          typeof outcome.receipt.target?.chatId === 'string' && outcome.receipt.target.chatId.length <= 1024;
+        const receiptValid = validReceipt(outcome?.receipt);
+        const validSettledAt = Number.isFinite(outcome?.settledAt) && outcome.settledAt >= 0;
+        const routing = claim?.routing;
+        const hasRouting = routing !== undefined && routing !== null;
+        const routingValid = validRouting(routing);
+        const routeMatchesReceipt = !hasRouting || (routingValid && outcome?.status === 'submitted' &&
+          outcome.receipt?.target?.platform === routing.platform && outcome.receipt?.target?.chatId === routing.chatId) ||
+          (routingValid && outcome?.status !== 'submitted');
+        const routeSafe = routingValid && routeMatchesReceipt;
+        const validOutcome = outcome?.version === 1 && validSettledAt && routeMatchesReceipt &&
+          (outcome.status === 'unknown' || (outcome.status === 'submitted' && receiptValid));
         const effective = claim && claim.version === 1 && ['submitted', 'pending'].includes(claim.status)
-          ? outcome && outcome.version === 1 && ['submitted', 'unknown'].includes(outcome.status) && (outcome.status !== 'submitted' || validReceipt) ? outcome.status : 'unknown'
+          ? validOutcome ? outcome.status : 'unknown'
           : 'unknown';
         const receipt = effective === 'submitted' ? outcome?.receipt : null;
         const platform = receipt?.target?.platform;
         const chatId = receipt?.target?.chatId;
-        const routing = claim?.routing;
-        const validRouting = routing?.version === 1 && routing.platform === 'slack' && /^T[A-Z0-9]+$/.test(routing.teamId ?? '') && /^[CGD][A-Z0-9]+$/.test(routing.chatId ?? '') &&
-          (!receipt || (receipt.target.platform === 'slack' && receipt.target.chatId === routing.chatId));
         const ref = randomUUID(); historyRefs.set(ref, key);
         rows.push({ id: ref, status: effective, time: effective === 'unknown' ? claim?.createdAt ?? null : outcome?.settledAt ?? claim.createdAt,
-          ...( ['line', 'telegram', 'discord', 'slack', 'whatsapp'].includes(platform) ? { platform } : {}),
-          ...(typeof chatId === 'string' && chatId.length <= 1024 ? { targetChatId: chatId } : validRouting ? { platform: 'slack', targetChatId: routing.chatId } : {}),
-          ...(validRouting ? { openSlack: true } : {}) });
+          ...(validPlatform(platform) ? { platform } : {}),
+          ...(typeof chatId === 'string' && chatId.length <= 1024 ? { targetChatId: chatId } : routeSafe ? { platform: 'slack', targetChatId: routing.chatId } : {}),
+          ...(routeSafe ? { openSlack: true } : {}) });
       }
       rows.sort((a, b) => (b.time ?? 0) - (a.time ?? 0));
       const result = rows.slice(0, limit);
       const keep = new Set(result.map(row => row.id));
       for (const id of historyRefs.keys()) if (!keep.has(id)) historyRefs.delete(id);
-      return result;
+      return { entries: result, truncated };
     },
     resolveHistoryRef(ref) { return typeof ref === 'string' && ref.length <= 64 && historyRefs.has(ref) ? this.get(historyRefs.get(ref)) : null; },
     resolveHistorySlackRoute(ref) {
@@ -147,7 +172,9 @@ function createForwardingLedger(directory) {
       if (claim?.version !== 1 || !['pending', 'submitted'].includes(claim.status) || route?.version !== 1 || route.platform !== 'slack' || !/^T[A-Z0-9]+$/.test(route.teamId ?? '') || !/^[CGD][A-Z0-9]+$/.test(route.chatId ?? '')) return null;
       let outcome = null;
       try { const file = keyPath(key, 'outcome'); const stat = fs.lstatSync(file); if (stat.isFile() && stat.size <= 16_384) outcome = read(file); } catch { /* pending and damaged outcomes remain reconcilable */ }
-      if (outcome?.status === 'submitted' && (outcome.receipt?.target?.platform !== 'slack' || outcome.receipt?.target?.chatId !== route.chatId)) return null;
+      if (outcome?.status === 'submitted') {
+        if (outcome.receipt?.target?.platform !== route.platform || outcome.receipt?.target?.chatId !== route.chatId) return null;
+      }
       return { teamId: route.teamId, chatId: route.chatId };
     },
   };
